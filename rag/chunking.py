@@ -20,6 +20,17 @@ from pathlib import Path
 DEFAULT_CHUNK_SIZE: int = 800
 DEFAULT_CHUNK_OVERLAP: int = 100
 
+# 目录名(即 Chunk.book)到完整显示书名的映射,用于 LLM 引用
+BOOK_SUBTITLES: dict[str, str] = {
+    "必修1": "必修1：分子与细胞",
+    "必修2": "必修2：遗传与进化",
+    "选择性必修1": "选择性必修1：稳态与调节",
+    "选择性必修2": "选择性必修2：生物与环境",
+    "选择性必修3": "选择性必修3：生物技术与工程",
+    "课后习题和答案": "课后习题和答案",
+    "高中生物学教材参考答案": "高中生物学教材参考答案",
+}
+
 
 @dataclass
 class Chunk:
@@ -55,9 +66,14 @@ class Chunk:
 
 
 def guess_page_number(filename: str) -> int:
-    """从文件名中提取最后一组连续数字作为页码,如 '选必1教材笔记12.md' -> 12"""
+    """从文件名中提取最后一组连续数字作为页码,如 '必修2:遗传与进化100.md' -> 100"""
     matches: list[str] = re.findall(r"(\d+)", Path(filename).stem)
     return int(matches[-1]) if matches else 0
+
+
+def get_display_book(book: str) -> str:
+    """根据目录名返回带副标题的完整显示书名"""
+    return BOOK_SUBTITLES.get(book, book)
 
 
 def extract_page_text(filepath: Path) -> str:

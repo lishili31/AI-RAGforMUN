@@ -17,7 +17,7 @@ env/
 # RAG 存储数据（向量库，可重新生成）
 rag_store/
 
-# 教材笔记 Markdown（ingest 输入数据）
+# 教材 Markdown（ingest 输入数据）
 md_output/
 
 # IDE / 系统

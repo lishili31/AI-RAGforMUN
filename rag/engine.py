@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Iterator, Optional
 
-from .chunking import Chunk
+from .chunking import Chunk, get_display_book
 from .clients import ChatClient, EmbeddingClient, RerankClient
 from .config import Settings
 from .store import VectorStore
@@ -29,7 +29,7 @@ SYSTEM_PROMPT: str = (
     "1. 严格依据下方【教材原文】中的内容作答,不要编造教材之外的知识;可以 reorganize、概括原文。\n"
     "2. 使用简体中文,条理清晰,适合高中生理解;涉及术语时保持教材原表述。\n"
     "3. 每个关键论断的句末必须标注出处,格式为【《书名》第N页】,"
-    "例如:【《选必1教材笔记》第28页】。出处信息已在每段原文开头给出。\n"
+    "例如:【《必修2：遗传与进化》第28页】。出处信息已在每段原文开头给出。\n"
     "4. 若【教材原文】中没有足以回答问题的内容,请明确回答"
     "「在教材中未找到相关内容」,不要强行作答。\n"
     "5. 不要提及「教材原文」四个字本身,直接给出答案。"
@@ -91,8 +91,9 @@ class RAGEngine:
         blocks: list[str] = []
         for idx, item in enumerate(passages, start=1):
             chunk: Chunk = item["chunk"]
+            display_book: str = get_display_book(chunk.book)
             blocks.append(
-                f"【出处{idx}】《{chunk.book}》第{chunk.page}页\n{chunk.content}"
+                f"【出处{idx}】《{display_book}》第{chunk.page}页\n{chunk.content}"
             )
         user_content: str = USER_PROMPT_TEMPLATE.format(
             passages="\n\n".join(blocks) if blocks else "(未检索到相关内容)",
@@ -115,4 +116,4 @@ class RAGEngine:
 
 def format_source(chunk: Chunk) -> str:
     """出处展示格式: 《书名》第N页"""
-    return f"《{chunk.book}》第{chunk.page}页"
+    return f"《{get_display_book(chunk.book)}》第{chunk.page}页"
