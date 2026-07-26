@@ -209,7 +209,7 @@ INDEX_HTML: str = """<!DOCTYPE html>
     <input id="question" placeholder="例如:兴奋在神经元之间是如何传递的?" autofocus>
     <button id="send">提问</button>
   </div>
-  <div class="hint">答案由教材原文检索生成,出处以【《书名》第N页】标注 · 支持 Markdown 渲染 · Enter 发送</div>
+  <div class="hint">答案由教材原文检索生成,出处以 Markdown 引用格式标注 · 支持 Markdown 渲染 · Enter 发送</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
