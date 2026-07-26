@@ -15,7 +15,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-PROJECT_ROOT: Path = Path(__file__).resolve().parent
+PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
 DEFAULT_LLM_BASE_URL: str = "https://api.kimi.com/coding/v1"
 DEFAULT_LLM_MODEL: str = "kimi-for-coding"
