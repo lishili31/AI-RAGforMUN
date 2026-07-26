@@ -192,7 +192,7 @@ sudo -u deploy pm2 logs rag-web
 | `rag/ingest.py` | 端到端索引构建脚本。 |
 | `rag/engine.py` | `RAGEngine`：检索、重排、prompt 组装、流式生成。 |
 | `rag/cli.py` | argparse 命令行入口。 |
-| `rag/web.py` | FastAPI 应用与内嵌 HTML/JS 前端。 |
+| `rag/web.py` | FastAPI 应用与内嵌 HTML/JS 前端;回答气泡通过 CDN 引入 marked + DOMPurify 渲染 Markdown(CDN 不可用时回退纯文本)。 |
 
 ## 代码风格与开发约定
 

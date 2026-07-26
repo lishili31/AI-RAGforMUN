@@ -143,11 +143,38 @@ INDEX_HTML: str = """<!DOCTYPE html>
   .msg { max-width: 820px; margin: 0 auto 16px; display: flex; }
   .msg .bubble {
     padding: 12px 16px; border-radius: 10px; line-height: 1.8;
-    white-space: pre-wrap; word-break: break-word; font-size: 15px;
+    word-break: break-word; font-size: 15px;
   }
   .msg.user { justify-content: flex-end; }
-  .msg.user .bubble { background: #2f6b4f; color: #fff; border-bottom-right-radius: 2px; }
+  .msg.user .bubble { background: #2f6b4f; color: #fff; border-bottom-right-radius: 2px; white-space: pre-wrap; }
   .msg.bot .bubble { background: #fff; border: 1px solid #e4e7eb; border-bottom-left-radius: 2px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  /* Markdown 渲染样式(回答气泡内) */
+  .msg.bot .bubble .md > :first-child { margin-top: 0; }
+  .msg.bot .bubble .md > :last-child { margin-bottom: 0; }
+  .msg.bot .bubble .md p, .msg.bot .bubble .md ul, .msg.bot .bubble .md ol,
+  .msg.bot .bubble .md pre, .msg.bot .bubble .md table,
+  .msg.bot .bubble .md blockquote { margin: 8px 0; }
+  .msg.bot .bubble .md h1, .msg.bot .bubble .md h2, .msg.bot .bubble .md h3,
+  .msg.bot .bubble .md h4 { margin: 12px 0 6px; font-size: 16px; }
+  .msg.bot .bubble .md ul, .msg.bot .bubble .md ol { padding-left: 22px; }
+  .msg.bot .bubble .md code {
+    background: #f1f3f5; border-radius: 4px; padding: 1px 5px;
+    font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px;
+  }
+  .msg.bot .bubble .md pre {
+    background: #f6f8fa; border: 1px solid #e4e7eb; border-radius: 6px;
+    padding: 10px 12px; overflow-x: auto;
+  }
+  .msg.bot .bubble .md pre code { background: none; padding: 0; }
+  .msg.bot .bubble .md blockquote {
+    border-left: 3px solid #2f6b4f; padding-left: 10px; color: #555;
+  }
+  .msg.bot .bubble .md table { border-collapse: collapse; }
+  .msg.bot .bubble .md th, .msg.bot .bubble .md td {
+    border: 1px solid #d0d5db; padding: 4px 10px; font-size: 14px;
+  }
+  .msg.bot .bubble .md th { background: #f1f3f5; }
+  .msg.bot .bubble .md hr { border: none; border-top: 1px solid #e4e7eb; margin: 10px 0; }
   .sources { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #ddd; font-size: 13px; color: #666; }
   .sources .tag {
     display: inline-block; background: #eef5f1; color: #2f6b4f;
@@ -182,13 +209,27 @@ INDEX_HTML: str = """<!DOCTYPE html>
     <input id="question" placeholder="例如:兴奋在神经元之间是如何传递的?" autofocus>
     <button id="send">提问</button>
   </div>
-  <div class="hint">答案由教材原文检索生成,出处以【《书名》第N页】标注 · Enter 发送</div>
+  <div class="hint">答案由教材原文检索生成,出处以【《书名》第N页】标注 · 支持 Markdown 渲染 · Enter 发送</div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script>
 const chat = document.getElementById('chat');
 const input = document.getElementById('question');
 const sendBtn = document.getElementById('send');
 let busy = false;
+
+// Markdown 渲染:marked 解析 + DOMPurify 消毒;CDN 加载失败时回退为纯文本
+const mdReady = !!(window.marked && window.DOMPurify);
+if (mdReady) marked.setOptions({breaks: true, gfm: true});
+
+function renderMd(text) {
+  if (mdReady) return DOMPurify.sanitize(marked.parse(text));
+  const div = document.createElement('div');
+  div.style.whiteSpace = 'pre-wrap';
+  div.textContent = text;
+  return div.innerHTML;
+}
 
 fetch('api/stats').then(r => r.json()).then(s => {
   if (s.ready) document.getElementById('stats').textContent =
@@ -222,7 +263,7 @@ async function ask() {
     });
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '', answer = '', sourcesBox = null;
+    let buffer = '', answer = '', mdBox = null;
     while (true) {
       const {done, value} = await reader.read();
       if (done) break;
@@ -236,11 +277,16 @@ async function ask() {
         if (payload === '[DONE]') continue;
         const data = JSON.parse(payload);
         if (data.type === 'token') {
-          if (!answer) bubble.textContent = '';
+          if (!mdBox) {
+            bubble.textContent = '';
+            mdBox = document.createElement('div');
+            mdBox.className = 'md';
+            bubble.appendChild(mdBox);
+          }
           answer += data.content;
-          bubble.textContent = answer;
+          mdBox.innerHTML = renderMd(answer);
         } else if (data.type === 'sources') {
-          sourcesBox = document.createElement('div');
+          const sourcesBox = document.createElement('div');
           sourcesBox.className = 'sources';
           sourcesBox.innerHTML = '出处: ' + data.sources.map(s =>
             `<span class="tag">${s.source}</span>`).join('');
