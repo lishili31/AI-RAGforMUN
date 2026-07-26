@@ -196,10 +196,14 @@ class ChatClient:
         last_error: Optional[Exception] = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
+                extra_body: dict = {}
+                if self.settings.llm_thinking_type:
+                    extra_body["thinking"] = {"type": self.settings.llm_thinking_type}
                 stream = self.client.chat.completions.create(
                     model=self.settings.llm_model,
                     messages=messages,
                     stream=True,
+                    extra_body=extra_body,
                 )
                 for event in stream:
                     if not event.choices:

@@ -19,6 +19,7 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
 DEFAULT_LLM_BASE_URL: str = "https://api.kimi.com/coding/v1"
 DEFAULT_LLM_MODEL: str = "kimi-for-coding"
+DEFAULT_LLM_THINKING_TYPE: str = "disabled"
 
 
 class ConfigurationError(Exception):
@@ -64,6 +65,7 @@ class Settings:
     llm_api_key: str
     llm_base_url: str = DEFAULT_LLM_BASE_URL
     llm_model: str = DEFAULT_LLM_MODEL
+    llm_thinking_type: str = DEFAULT_LLM_THINKING_TYPE
 
     # Embedding(向量化)
     embedding_host: str = ""
@@ -88,6 +90,7 @@ class Settings:
             llm_api_key=_required("KIMI_API_KEY"),
             llm_base_url=_optional("API_BASE_URL", DEFAULT_LLM_BASE_URL),
             llm_model=_optional("API_MODEL", DEFAULT_LLM_MODEL),
+            llm_thinking_type=_optional("LLM_THINKING_TYPE", DEFAULT_LLM_THINKING_TYPE),
             embedding_host=_required("EMBEDDING_BINDING_HOST"),
             embedding_api_key=_required("EMBEDDING_BINDING_API_KEY"),
             embedding_model=_optional("EMBEDDING_MODEL", "bge-m3"),
