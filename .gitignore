@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 环境变量/密钥
+.env
+.env.*
+
+# RAG 存储数据（向量库，可重新生成）
+rag_store/
+
+# 教材笔记 Markdown（ingest 输入数据）
+md_output/
+
+# IDE / 系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
