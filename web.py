@@ -4,7 +4,7 @@
 Web 聊天界面(FastAPI,无前端构建,单文件页面)。
 
 Usage:
-    python -m rag.web [--host 127.0.0.1] [--port 8000]
+    python -m rag.web [--host 127.0.0.1] [--port 5000]
 
 接口:
     GET  /            聊天页面
@@ -273,7 +273,7 @@ def index() -> str:
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="rag.web", description="高中生物教材 RAG Web 问答")
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--store-dir", type=str, default=str(STORE_DIR), help="索引目录")
     return parser.parse_args()
 
