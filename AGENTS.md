@@ -23,15 +23,17 @@
 ├── requirements.txt          # Python 依赖
 ├── .env                      # 环境变量（API 密钥、服务地址），敏感文件
 ├── .gitignore                # 忽略 .env、rag_store/、md_output/ 等
-├── __init__.py               # 包说明与模块索引
-├── config.py                 # 配置加载（.env → Settings）
-├── chunking.py               # 解析 Markdown 并切分为文本块
-├── clients.py                # Embedding / Rerank / Chat 三个外部 API 客户端
-├── store.py                  # 基于 numpy 的本地向量库存储与检索
-├── ingest.py                 # 构建向量索引
-├── engine.py                 # RAG 检索 + 生成管线
-├── cli.py                    # 命令行入口
-├── web.py                    # FastAPI Web 服务与单文件前端
+├── AGENTS.md                 # 项目说明与 AI 助手指南
+└── rag/                      # Python 包：RAG 核心代码
+    ├── __init__.py           # 包说明与模块索引
+    ├── config.py             # 配置加载（.env → Settings）
+    ├── chunking.py           # 解析 Markdown 并切分为文本块
+    ├── clients.py            # Embedding / Rerank / Chat 三个外部 API 客户端
+    ├── store.py              # 基于 numpy 的本地向量库存储与检索
+    ├── ingest.py             # 构建向量索引
+    ├── engine.py             # RAG 检索 + 生成管线
+    ├── cli.py                # 命令行入口
+    └── web.py                # FastAPI Web 服务与单文件前端
 ├── md_output/                # 教材单页 Markdown 输入数据
 └── rag_store/                # 构建好的向量索引（可重新生成）
 ```
@@ -56,33 +58,33 @@
    - 页码通过文件名中最后一组连续数字推断（如 `选必1教材笔记12.md` → 12）。
    - `index.md` 文件会被跳过。
 
-2. **分块**：`chunking.py`
+2. **分块**：`rag/chunking.py`
    - 默认 `chunk_size=800`、`overlap=100`。
    - 优先按空行（段落）边界切分；单段过长时按字符硬切；相邻块保留重叠。
    - 每个 `Chunk` 携带 `id`、`book`、`page`、`chunk_index`、`content`、`metadata`。
 
-3. **向量化与索引**：`ingest.py` → `store.py`
+3. **向量化与索引**：`rag/ingest.py` → `rag/store.py`
    - 使用 bge-m3 类 Embedding 模型将文本块批量向量化。
    - 向量按行做 L2 归一化后保存为 `rag_store/vectors.npy`。
    - 文本块保存为 `rag_store/chunks.json`。
    - 元信息保存为 `rag_store/meta.json`。
 
-4. **检索与生成**：`engine.py`
+4. **检索与生成**：`rag/engine.py`
    - 查询向量化 → 余弦相似度 top-20 召回 → bge-reranker 重排序取 top-6 → 组装 prompt → kimi-for-coding 流式生成答案。
 
-5. **客户端**：`clients.py`
+5. **客户端**：`rag/clients.py`
    - `EmbeddingClient`：OpenAI 兼容接口，支持 `base64` 与 `float` 返回，可配置是否发送 `dimensions` 参数。
    - `RerankClient`：Cohere 兼容 `/rerank` 接口。
    - `ChatClient`：OpenAI 兼容流式对话接口。
    - 所有调用带 3 次指数退避重试（1s、2s、4s）。
 
 6. **交互层**：
-   - `cli.py`：单次问答或交互式 REPL。
-   - `web.py`：FastAPI 服务，提供 `/` 聊天页面、`POST /api/chat` SSE 流式回答、`GET /api/stats` 索引统计。
+   - `rag/cli.py`：单次问答或交互式 REPL。
+   - `rag/web.py`：FastAPI 服务，提供 `/` 聊天页面、`POST /api/chat` SSE 流式回答、`GET /api/stats` 索引统计。
 
 ## 配置
 
-所有配置通过 `.env` 文件加载，由 `config.py` 统一管理。`.env` 是敏感文件，不应提交到版本控制。
+所有配置通过 `.env` 文件加载，由 `rag/config.py` 统一管理。`.env` 是敏感文件，不应提交到版本控制。
 
 必需的配置项：
 
@@ -159,14 +161,14 @@ python -m rag.web --store-dir ./rag_store
 
 | 文件 | 职责 |
 |------|------|
-| `config.py` | 定义 `Settings` dataclass，从 `.env` 加载配置；定义 `ConfigurationError`。 |
-| `chunking.py` | 定义 `Chunk` 数据类；扫描 `md_output` 并按页分块。 |
-| `clients.py` | 封装三个外部 HTTP API 客户端，统一重试逻辑。 |
-| `store.py` | `VectorStore`：本地向量库，负责 save / load / search / meta。 |
-| `ingest.py` | 端到端索引构建脚本。 |
-| `engine.py` | `RAGEngine`：检索、重排、prompt 组装、流式生成。 |
-| `cli.py` | argparse 命令行入口。 |
-| `web.py` | FastAPI 应用与内嵌 HTML/JS 前端。 |
+| `rag/config.py` | 定义 `Settings` dataclass，从 `.env` 加载配置；定义 `ConfigurationError`。 |
+| `rag/chunking.py` | 定义 `Chunk` 数据类；扫描 `md_output` 并按页分块。 |
+| `rag/clients.py` | 封装三个外部 HTTP API 客户端，统一重试逻辑。 |
+| `rag/store.py` | `VectorStore`：本地向量库，负责 save / load / search / meta。 |
+| `rag/ingest.py` | 端到端索引构建脚本。 |
+| `rag/engine.py` | `RAGEngine`：检索、重排、prompt 组装、流式生成。 |
+| `rag/cli.py` | argparse 命令行入口。 |
+| `rag/web.py` | FastAPI 应用与内嵌 HTML/JS 前端。 |
 
 ## 代码风格与开发约定
 
@@ -192,7 +194,7 @@ python -m rag.web --store-dir ./rag_store
 
 - `.env` 文件包含 API 密钥，已加入 `.gitignore`，切勿提交到版本控制。
 - `rag_store/` 与 `md_output/` 也已在 `.gitignore` 中，分别为可重新生成的索引数据与原始教材输入数据。
-- `web.py` 默认仅监听 `127.0.0.1`，如需暴露到公网请谨慎考虑鉴权与 HTTPS。
+- `rag/web.py` 默认仅监听 `127.0.0.1`，如需暴露到公网请谨慎考虑鉴权与 HTTPS。
 - Web 接口未做访问控制，生产环境部署时应添加反向代理、限流与身份验证。
 
 ## 已知限制
