@@ -157,6 +157,30 @@ python -m rag.web --store-dir ./rag_store
 
 访问 `http://<host>:<port>/` 即可使用聊天页面。Web 服务提供 SSE 流式回答。
 
+### 生产部署（nginx 子目录 + PM2）
+
+线上通过 nginx 子目录 `https://www.stringandstick.cn/rag` 访问，配置位于
+`/etc/nginx/sites-available/stringandstick.conf`（443 与 80 两个 server 块中各有一份
+`/rag` location，`proxy_pass http://127.0.0.1:5000/`，已关闭缓冲以支持 SSE）。
+
+注意：前端 JS 中的 `fetch('api/chat')` / `fetch('api/stats')` 是**相对路径**，
+以便同时兼容直接访问（`127.0.0.1:5000/`）和子目录代理（`/rag/`），不要改回绝对路径。
+
+服务以 PM2 托管（进程名 `rag-web`），运行在 **deploy 用户**的 PM2 实例下
+（与 blog-api、cloudfile 等其他应用同一个实例；请勿用 root 的 PM2 托管）：
+
+```bash
+# 启动（deploy 用户，在项目根目录执行）
+pm2 start .venv/bin/python --name rag-web -- -m rag.web --host 127.0.0.1 --port 5000
+pm2 save   # 保存进程列表，配合 pm2-deploy systemd 服务开机自启
+
+# 日常维护（root 下操作时需切换身份）
+sudo -u deploy pm2 restart rag-web
+sudo -u deploy pm2 logs rag-web
+```
+
+修改配置后执行 `nginx -t && systemctl reload nginx`。
+
 ## 代码组织与模块职责
 
 | 文件 | 职责 |

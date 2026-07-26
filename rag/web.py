@@ -190,7 +190,7 @@ const input = document.getElementById('question');
 const sendBtn = document.getElementById('send');
 let busy = false;
 
-fetch('/api/stats').then(r => r.json()).then(s => {
+fetch('api/stats').then(r => r.json()).then(s => {
   if (s.ready) document.getElementById('stats').textContent =
     `已索引 ${s.chunk_count} 个片段 · ${s.books.length} 本教材`;
 }).catch(() => {});
@@ -215,7 +215,7 @@ async function ask() {
   bubble.textContent = '检索中…';
 
   try {
-    const resp = await fetch('/api/chat', {
+    const resp = await fetch('api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question})
