@@ -39,7 +39,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `id` | str | 条目唯一标识，形如 `test_0001` |
+| `id` | str | 条目唯一标识，形如 `pkunmun2025_manual_front_0001` |
 | `source` | str | 人类可读的文档名，用于出处标注 |
 | `section` | str | 章节路径，可为空串 |
 | `content` | str | 忠实于原文的正文，禁止虚构 |
@@ -49,6 +49,10 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 禁止出现上述之外的顶层字段。
 
 `source/test.json` 是**人工保留的 schema 样例**（条目演示了上述字段结构，其中未给出 `url`），不是任何 `.html` 的解析产物，**禁止覆盖或删除**；`parse` 只处理 `.html` / `.md`，不会写这个文件。
+
+注意：结构化 JSON 必须放进 `source/json/`——那才是 `ingest` 的输入目录（`--input-dir` 默认值），放在 `source/` 根目录下的 JSON 不会被索引。另外 `source/test.json` 的前两个条目与 `source/json/北大学标PKUNMUN2025_学术标准手册.json` 的前两条 `id` 相同，若把 `--input-dir` 指向 `source/` 会让这两条重复入库。
+
+当前 `source/json/北大学标PKUNMUN2025_学术标准手册.json` 的 299 个条目都省略了 `url` 字段（`chunking` 按空串容错），因此该文档的出处只能标注文档名与章节，没有原始链接。
 
 ## 项目结构
 
@@ -70,9 +74,8 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 │   ├── cli.py                # 命令行入口
 │   └── web.py                # FastAPI Web 服务与单文件前端
 ├── source/                   # 原始资料与解析产物
-│   ├── test.html             # 示例原始文件
 │   ├── test.json             # 人工保留的 schema 样例，勿覆盖
-│   └── json/                 # parse 产物：<stem>.json（由 python -m rag.parse 生成）
+│   └── json/                 # 结构化 JSON：北大学标PKUNMUN2025_学术标准手册.json
 └── rag_store/                # 构建好的向量索引（由 python -m rag.ingest 生成，可重建）
 ```
 
@@ -155,7 +158,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 | `EMBEDDING_USE_BASE64` | `True` | Embedding 返回是否使用 base64 编码 |
 | `RERANK_MODEL` | `bge-reranker-v2-m3` | Rerank 模型名 |
 
-当前 `rag_store/` 已构建：18 个文本块、1024 维，来源为 `test.html`（由 `source/json/test.json` 切分而来）。新增资料后需重跑 `python -m rag.parse` 与 `python -m rag.ingest`；在索引建好之前 `cli` 与 `web` 的提问都会失败，`GET /api/stats` 会返回 `ready: false`。
+当前 `rag_store/` 已构建：299 个文本块、1024 维，来源为 `北大学标PKUNMUN2025_学术标准手册`（由 `source/json/北大学标PKUNMUN2025_学术标准手册.json` 切分而来）。新增资料后需重跑 `python -m rag.parse` 与 `python -m rag.ingest`；在索引建好之前 `cli` 与 `web` 的提问都会失败，`GET /api/stats` 会返回 `ready: false`。
 
 ## 常用命令
 
