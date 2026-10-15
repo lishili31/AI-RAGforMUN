@@ -69,7 +69,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 │   ├── chunking.py           # 载入 source/json 结构化 JSON 并切分为文本块
 │   ├── clients.py            # Embedding / Rerank / Chat 三个外部 API 客户端
 │   ├── store.py              # 基于 numpy 的本地向量库存储与检索
-│   ├── ingest.py             # 构建向量索引
+│   ├── ingest.py             # 增量构建向量索引
 │   ├── engine.py             # RAG 检索 + 生成管线
 │   ├── cli.py                # 命令行入口
 │   └── web.py                # FastAPI Web 服务与单文件前端
@@ -111,8 +111,10 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
    - 使用 bge-m3 类 Embedding 模型将文本块批量向量化。
    - 向量按行做 L2 归一化后保存为 `rag_store/vectors.npy`。
    - 文本块保存为 `rag_store/chunks.json`。
-   - 元信息保存为 `rag_store/meta.json`，键为 `chunk_count`、`dim`、`sources`、`built_at`（`sources` 是去重排序后的 `chunk.source` 列表）。
-   - 每次运行都会全量重建索引，没有增量更新。
+   - 元信息保存为 `rag_store/meta.json`，键为 `chunk_count`、`dim`、`sources`、`built_at`、`embedding_model`（`sources` 是去重排序后的 `chunk.source` 列表；`embedding_model` 记录向量由哪个模型生成，供缓存校验）。
+   - 增量更新：`load_vector_cache` 先读出现有索引，建立「正文 → 向量」缓存，只有正文不在缓存中（新增或内容变化）的文本才调用 Embedding 接口（同一正文本轮只向量化一次），未变化的块原样复用旧向量。最终索引以本次分块结果为准整体重写，因此被删除资料的向量不会残留，索引中每一行向量都与其正文一一对应。
+   - 缓存仅在现有索引的 `embedding_model` 与 `dim` 都与当前配置一致、且 `chunks.json` 与 `vectors.npy` 行数自洽时启用；模型变化、维度变化或索引文件损坏（含旧版本构建、meta 中缺少 `embedding_model` 的索引）会打印原因并自动全量重建，`--force` 可强制忽略缓存全量向量化。
+   - 分块仍是全量执行（每次重扫 `source/json/` 下的全部 JSON），但这一步不调用 API；增量省下的是 Embedding 调用与费用。
 
 5. **检索与生成**：`rag/engine.py`
    - 查询向量化 → 余弦相似度 top-30 召回 → bge-reranker 重排序取 top-6 → 丢弃重排分数低于 `RERANK_SCORE_THRESHOLD`（0.30）的段落 → 组装 prompt → kimi-for-coding 流式生成答案。
@@ -185,18 +187,23 @@ python -m rag.parse --input-dir ./source --output-dir ./source/json --force
 ### 构建/重建索引
 
 ```bash
-# 使用默认输入目录 ./source/json 与输出目录 ./rag_store
+# 增量更新:只有新增或内容变化的文本会调用 Embedding 接口
 python -m rag.ingest
 
 # 自定义目录与分块参数
 python -m rag.ingest --input-dir ./source/json --store-dir ./rag_store --chunk-size 800 --overlap 100
+
+# 忽略向量缓存，强制全量重新向量化
+python -m rag.ingest --force
 ```
+
+运行日志按来源打印「复用 N / 新向量化 M」；全部命中缓存时输出「全部命中向量缓存，跳过 Embedding 调用」，不产生 API 调用。换 Embedding 模型或维度后首次运行会自动全量重建并说明原因。
 
 ### 新增资料（日常更新流程）
 
 1. 把 `.html` / `.md` 文件放进 `source/`。
 2. `python -m rag.parse` 生成/更新 `source/json/<stem>.json`。
-3. `python -m rag.ingest` 全量重建 `rag_store/`。
+3. `python -m rag.ingest` 增量更新 `rag_store/`（只有新增或变化的正文会重新向量化）。
 4. 重启 Web 服务以载入新索引（见下节 `pm2 restart rag-web`）。
 
 ### 命令行问答
@@ -260,7 +267,7 @@ sudo -u deploy pm2 logs rag-web
 | `rag/chunking.py` | 定义 `Chunk` 数据类；载入 `source/json` 下的结构化 JSON 并切分为文本块。 |
 | `rag/clients.py` | 封装三个外部 HTTP API 客户端，统一重试逻辑。 |
 | `rag/store.py` | `VectorStore`：本地向量库，负责 save / load / search / meta。 |
-| `rag/ingest.py` | 端到端索引构建脚本。 |
+| `rag/ingest.py` | 增量索引构建脚本：按正文复用现有向量，只向量化新增/变化的文本。 |
 | `rag/engine.py` | `RAGEngine`：检索、重排、prompt 组装、流式生成；模块级 `format_source`。 |
 | `rag/cli.py` | argparse 命令行入口。 |
 | `rag/web.py` | FastAPI 应用与内嵌 HTML/JS 前端;回答气泡通过 CDN 引入 marked + DOMPurify 渲染 Markdown(CDN 不可用时回退纯文本)。 |
@@ -280,7 +287,8 @@ sudo -u deploy pm2 logs rag-web
 项目中没有单元测试、集成测试或测试框架配置。验证功能的方式是：
 
 1. 运行 `python -m rag.parse`，确认 `source/json/` 下生成了结构合法的 JSON 数组。
-2. 运行 `python -m rag.ingest` 成功构建索引（`rag_store/meta.json` 出现且 `chunk_count` 大于 0）。
+2. 运行 `python -m rag.ingest` 成功构建索引（`rag_store/meta.json` 出现，`chunk_count` 大于 0，且其中的 `embedding_model` 与当前 Embedding 模型一致）。
+   - 增量行为验证：紧接着再运行一次 `python -m rag.ingest`，日志应显示全部文本块命中向量缓存、跳过 Embedding 调用，且块数与向量不变；给 `source/json/` 新增或修改正文后再运行，日志应只对新增/变化的文本调用 Embedding（其余块「复用」），未变化块的向量逐字节不变；删除某份资料后运行，对应块与向量应消失且余下向量不变。
 3. 运行 `python -m rag.cli "一个模联问题"` 检查是否能正常检索并生成带出处链接的答案。
 4. 运行 `python -m rag.cli "<一句有语病的英语>"`，确认「语法修改」在没有任何检索结果时也能作答。
 5. 运行 `python -m rag.cli "把这句中文译成英语:<一句话>"` 与 `"帮我润色这句英语:<一句话>"`，确认中译英与润色同样可用（语言处理不依赖检索结果）。
@@ -304,7 +312,8 @@ sudo -u deploy pm2 logs rag-web
 - 没有测试套件，也没有 CI/CD 配置。
 - Web 前端为单文件内嵌 HTML/JS，没有前端构建流程；Markdown 渲染依赖 CDN 上的 marked + DOMPurify，CDN 不可用时回退纯文本。
 - `parse` 依赖大模型重写原始资料，结果可能遗漏细节或引入偏差，且每个文件都要调用一次 API（耗时与计费）；入库前应人工抽查 `source/json/` 产物。
-- 索引为全量重建（`ingest` 每次重扫全部 `source/json/`）；`parse` 有基于修改时间的增量跳过，但切分粒度由大模型决定，同一文件重解析的条目数会变化（实测同一输入一次 20 条、一次 18 条）。
+- `ingest` 的增量以文本块正文为键：本地分块仍会全量重扫 `source/json/`（不调用 API），只有新增或内容变化的正文才重新向量化，因此改写一个条目的文字只会重算该条目切出的块。缓存只校验 `embedding_model` 与 `dim`——同一模型名换了 Embedding 服务地址或返回编码（base64/float）不会使缓存失效；由旧版本构建、`meta.json` 缺少 `embedding_model` 的索引在升级后第一次运行会全量重建一次。
+- `parse` 有基于修改时间的增量跳过，但切分粒度由大模型决定，同一文件重解析的条目数会变化（实测同一输入一次 20 条、一次 18 条）；条目数或文字变化都会产生新正文，`ingest` 只对这些增量重新向量化。
 - 重排分数阈值 `RERANK_SCORE_THRESHOLD=0.30` 是经验值：当前语料与 bge-reranker-v2-m3 下能把无关问题挡掉（实测无关问题重排最高分 0.0000–0.0001，相关问题 0.59–0.92）。换 rerank 模型或换语料后需重新标定，阈值过高会把弱相关但正确的段落一并滤掉。
 - 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。当前手册的 299 个条目都指向 `/rag/北大学标PKUNMUN2025_学术标准手册.pdf`，同一份文档共用一个链接（没有按章节/页码定位到具体页）。
 - 用途边界（拒绝决策、拒绝代写文件）只靠 `SYSTEM_PROMPT` 约束，是提示词层面的软限制，不是访问控制：在提示词注入或强指令下仍可能被绕过，需要硬保证时应在服务层加拦截或人工审核。

@@ -6,7 +6,7 @@
 存储内容(rag_store/ 目录):
     chunks.json  — 全部文本块(含来源、章节、链接、正文)
     vectors.npy  — 归一化后的 float32 向量矩阵 (N, dim)
-    meta.json    — 块数、维度、来源列表、构建时间等元信息
+    meta.json    — 块数、维度、来源列表、构建时间、向量化模型等元信息
 
 向量在入库时已做 L2 归一化,检索即矩阵点积(等价余弦相似度)。
 """
@@ -68,7 +68,8 @@ class VectorStore:
         )
         return ranked
 
-    def save(self, store_dir: Path) -> None:
+    def save(self, store_dir: Path, embedding_model: str = "") -> None:
+        """落盘 chunks.json / vectors.npy / meta.json(embedding_model 供向量缓存校验)"""
         store_dir.mkdir(parents=True, exist_ok=True)
         (store_dir / CHUNKS_FILENAME).write_text(
             json.dumps(
@@ -87,6 +88,7 @@ class VectorStore:
                     "dim": int(self.vectors.shape[1]) if len(self.chunks) else 0,
                     "sources": sources,
                     "built_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "embedding_model": embedding_model,
                 },
                 ensure_ascii=False,
                 indent=1,
