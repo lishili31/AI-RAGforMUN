@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-构建 RAG 索引:扫描 md_output 单页 Markdown → 分块 → 批量向量化 → 落盘到 rag_store/。
+构建 RAG 索引:读取 source/json 下的结构化 JSON → 分块 → 批量向量化 → 落盘到 rag_store/。
 
 Usage:
     python -m rag.ingest                          # 使用默认目录
-    python -m rag.ingest --input-dir ./md_output --store-dir ./rag_store
+    python -m rag.ingest --input-dir ./source/json --store-dir ./rag_store
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from .chunking import Chunk, build_chunks, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP
+from .chunking import Chunk, load_chunks, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP
 from .clients import EmbeddingClient, EMBED_BATCH_SIZE
 from .config import ConfigurationError, Settings
 from .store import VectorStore
@@ -35,13 +35,13 @@ logger = logging.getLogger("rag.ingest")
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="rag.ingest",
-        description="构建高中生物教材 RAG 向量索引",
+        description="构建模拟联合国规则与事实问答 RAG 向量索引",
     )
     parser.add_argument(
         "--input-dir",
         type=str,
-        default="./md_output",
-        help="单页 Markdown 根目录(默认: ./md_output)",
+        default="./source/json",
+        help="结构化 JSON 根目录(默认: ./source/json)",
     )
     parser.add_argument(
         "--store-dir",
@@ -66,14 +66,14 @@ def main() -> None:
         sys.exit(1)
 
     logger.info("扫描并分块: %s", input_dir)
-    chunks: list[Chunk] = build_chunks(input_dir, args.chunk_size, args.overlap)
+    chunks: list[Chunk] = load_chunks(input_dir, args.chunk_size, args.overlap)
     if not chunks:
         logger.error("未切分出任何文本块,请检查输入目录")
         sys.exit(1)
 
-    book_counts = Counter(chunk.book for chunk in chunks)
-    for book, count in sorted(book_counts.items()):
-        logger.info("  %s: %d 块", book, count)
+    source_counts = Counter(chunk.source for chunk in chunks)
+    for source, count in sorted(source_counts.items()):
+        logger.info("  %s: %d 块", source or "(未命名来源)", count)
     logger.info("共 %d 个文本块,开始向量化(模型 %s)...", len(chunks), settings.embedding_model)
 
     embedder = EmbeddingClient(settings)

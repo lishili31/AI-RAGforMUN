@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Iterator, Optional
 
-from .chunking import Chunk, get_display_book
+from .chunking import Chunk
 from .clients import ChatClient, EmbeddingClient, RerankClient
 from .config import Settings
 from .store import VectorStore
@@ -24,23 +24,38 @@ RETRIEVE_TOP_K: int = 20   # 向量检索召回数
 RERANK_TOP_N: int = 6      # 重排后送入 LLM 的段落数
 
 SYSTEM_PROMPT: str = (
-    "你是一位严谨的高中生物学习助手,正在帮助学生查阅权威的人教版高中生物教材。\n\n"
+    "你是一位模拟联合国(MUN)学术助手,为参会代表查询议事规则、会议程序与相关事实。\n\n"
     "## 回答规则\n"
-    "1. 严格依据下方【教材原文】中的内容作答,不要编造教材之外的知识;可以 reorganize、概括原文。\n"
-    "2. 使用简体中文,条理清晰,适合高中生理解;涉及术语时保持教材原表述。\n"
+    "1. 严格依据下方【检索到的文件原文】中的内容作答,不要编造文件之外的规则或事实;"
+    "可以在忠于原文的前提下概括、重新组织表述。\n"
+    "2. 使用简体中文,条理清晰,便于参会代表理解与引用;涉及议事规则术语时保持文件原表述"
+    "(如 motion、point of order、quorum 等)。\n"
     "3. 每个关键论断的句末必须标注出处,使用 Markdown 引用格式(以 '> ' 开头),"
-    "例如:\n> 《必修2：遗传与进化》第28页\n出处信息已在每段原文开头给出。\n"
-    "4. 若【教材原文】中没有足以回答问题的内容,请明确回答"
-    "「在教材中未找到相关内容」,不要强行作答。\n"
-    "5. 不要提及「教材原文」四个字本身,直接给出答案。"
+    "文件名称与被引用条目的链接已在每段原文开头给出,必须原样使用,不得杜撰链接,例如:\n"
+    "> 来源:[《模联议事规则手册》](https://example.org/mun/rules)\n"
+    "4. 若【检索到的文件原文】中没有足以回答问题的内容,请明确回答"
+    "「在已收录的文件中未找到相关内容」,不要强行作答。\n"
+    "5. 不要提及【检索到的文件原文】这个措辞本身,直接给出答案。"
 )
 
 USER_PROMPT_TEMPLATE: str = (
-    "## 教材原文\n"
+    "## 检索到的文件原文\n"
     "{passages}\n\n"
     "## 问题\n"
     "{question}"
 )
+
+
+def _split_labels(chunk: Chunk) -> tuple[str, str]:
+    """拆分出 (文档名（章节）、链接),空片段保持空串"""
+    source: str = (chunk.source or "").strip()
+    section: str = (chunk.section or "").strip()
+    url: str = (chunk.url or "").strip()
+    if source and section:
+        title = f"{source}（{section}）"
+    else:
+        title = source or section
+    return title, url
 
 
 class RAGEngine:
@@ -91,12 +106,14 @@ class RAGEngine:
         blocks: list[str] = []
         for idx, item in enumerate(passages, start=1):
             chunk: Chunk = item["chunk"]
-            display_book: str = get_display_book(chunk.book)
-            blocks.append(
-                f"【出处{idx}】《{display_book}》第{chunk.page}页\n{chunk.content}"
-            )
+            title, url = _split_labels(chunk)
+            lines: list[str] = [f"【出处{idx}】{title}" if title else f"【出处{idx}】"]
+            if url:
+                lines.append(f"链接: {url}")
+            lines.append(chunk.content)
+            blocks.append("\n".join(lines))
         user_content: str = USER_PROMPT_TEMPLATE.format(
-            passages="\n\n".join(blocks) if blocks else "(未检索到相关内容)",
+            passages="\n\n".join(blocks) if blocks else "(未检索到任何文件原文)",
             question=question,
         )
         return [
@@ -114,6 +131,11 @@ class RAGEngine:
         yield from self.chat.stream_chat(messages)
 
 
+def format_source_title(chunk: Chunk) -> str:
+    """出处标题(不含链接): 文档名（章节）,无章节时只有文档名"""
+    return _split_labels(chunk)[0]
+
+
 def format_source(chunk: Chunk) -> str:
-    """出处展示格式: 《书名》第N页"""
-    return f"《{get_display_book(chunk.book)}》第{chunk.page}页"
+    """出处展示格式: 文档名（章节） URL,空片段省略"""
+    return " ".join(part for part in _split_labels(chunk) if part).strip()

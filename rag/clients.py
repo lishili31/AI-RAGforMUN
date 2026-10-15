@@ -6,7 +6,7 @@ Embedding / Rerank / Chat 三个外部 API 的客户端封装。
 - Embedding: OpenAI 兼容接口(bge-m3),支持 base64/float 两种返回编码,
   是否发送 dimensions 参数由 EMBEDDING_SEND_DIM 控制。
 - Rerank: Cohere 兼容接口(bge-reranker-v2-m3),POST {model, query, documents, top_n}。
-- Chat: OpenAI 兼容流式接口(kimi-for-coding)。
+- Chat: OpenAI 兼容对话接口(kimi-for-coding),支持流式(stream_chat)与非流式(complete_chat)。
 
 所有调用带指数退避重试(1s, 2s, 4s)。
 """
@@ -181,7 +181,7 @@ class RerankClient:
 
 
 class ChatClient:
-    """kimi-for-coding 流式对话客户端(OpenAI 兼容)"""
+    """kimi-for-coding 对话客户端(OpenAI 兼容,支持流式与非流式)"""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -190,6 +190,35 @@ class ChatClient:
             base_url=settings.llm_base_url,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
+
+    def complete_chat(self, messages: list[dict]) -> str:
+        """非流式对话,一次性返回完整回答文本(用于材料结构化解析)"""
+        last_error: Optional[Exception] = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                extra_body: dict = {}
+                if self.settings.llm_thinking_type:
+                    extra_body["thinking"] = {"type": self.settings.llm_thinking_type}
+                response = self.client.chat.completions.create(
+                    model=self.settings.llm_model,
+                    messages=messages,
+                    stream=False,
+                    extra_body=extra_body,
+                )
+                if not response.choices:
+                    raise APIClientError("Chat 返回不含任何 choices")
+                return response.choices[0].message.content or ""
+            except (APITimeoutError, APIError, RateLimitError) as e:
+                last_error = e
+                wait: float = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "Chat 请求失败(第 %d/%d 次): %s,%.0fs 后重试",
+                    attempt, MAX_RETRIES, e, wait,
+                )
+                if attempt < MAX_RETRIES:
+                    time.sleep(wait)
+
+        raise APIClientError(f"Chat 请求在 {MAX_RETRIES} 次重试后失败: {last_error}")
 
     def stream_chat(self, messages: list[dict]) -> Iterator[str]:
         """流式生成回答,逐段 yield 文本增量"""

@@ -4,9 +4,9 @@
 基于 numpy 的本地向量库。
 
 存储内容(rag_store/ 目录):
-    chunks.json  — 全部文本块(含书名、页码、正文)
+    chunks.json  — 全部文本块(含来源、章节、链接、正文)
     vectors.npy  — 归一化后的 float32 向量矩阵 (N, dim)
-    meta.json    — 块数、维度、构建时间等元信息
+    meta.json    — 块数、维度、来源列表、构建时间等元信息
 
 向量在入库时已做 L2 归一化,检索即矩阵点积(等价余弦相似度)。
 """
@@ -79,13 +79,13 @@ class VectorStore:
             encoding="utf-8",
         )
         np.save(store_dir / VECTORS_FILENAME, self.vectors)
-        books: list[str] = sorted({chunk.book for chunk in self.chunks})
+        sources: list[str] = sorted({chunk.source for chunk in self.chunks})
         (store_dir / META_FILENAME).write_text(
             json.dumps(
                 {
                     "chunk_count": len(self.chunks),
                     "dim": int(self.vectors.shape[1]) if len(self.chunks) else 0,
-                    "books": books,
+                    "sources": sources,
                     "built_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 },
                 ensure_ascii=False,

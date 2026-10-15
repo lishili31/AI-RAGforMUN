@@ -4,17 +4,50 @@
 
 ## 项目概述
 
-这是一个基于检索增强生成（RAG）的高中生物教材问答应用，使用 Python 编写。项目从 `md_output/` 目录下的单页 Markdown 教材文本构建向量索引，然后通过“向量化检索 → 重排序 → 大模型流式生成答案”的流水线回答用户问题。
+这是一个基于检索增强生成（RAG）的**模拟联合国（MUN）规则与事实问答**应用，使用 Python 编写。数据来源是使用者放进 `source/` 目录的 `.html` / `.md` 资料：先用大模型把原始文件重写为结构化 JSON，再切块、向量化构建索引，最后通过“向量化检索 → 重排序 → 大模型流式生成答案”的流水线回答用户问题。
 
-- 目标用户：高中生/需要查询人教版高中生物教材的学习者。
+- 目标用户：参加模拟联合国活动、需要查询会议规则与文件事实的代表与组织者。
 - 答案语言：简体中文。
-- 答案必须基于教材原文，并在关键论断处标注出处，使用 Markdown 引用格式，例如 `> 《书名》第 N 页`。
+- 答案必须基于文件原文，并在关键论断处标注出处（文档名、章节与真实原始链接），使用 Markdown 引用格式，例如 `> 文档名（章节） https://example.org/doc`。
 
 主要入口：
 
+- 解析原始资料：`python -m rag.parse`
+- 构建索引：`python -m rag.ingest`
 - 命令行问答：`python -m rag.cli`
 - Web 聊天界面：`python -m rag.web`
-- 构建索引：`python -m rag.ingest`
+
+## 数据流
+
+```text
+source/*.html|*.md
+   │  python -m rag.parse   （Chat API 重写为结构化 JSON）
+   ▼
+source/json/<stem>.json
+   │  python -m rag.ingest  （Embedding 向量化）
+   ▼
+rag_store/  （chunks.json + vectors.npy + meta.json）
+   │  检索 → 重排 → 流式生成
+   ▼
+带出处链接的答案（cli / web）
+```
+
+## JSON 契约
+
+`python -m rag.parse` 为 `source/` 下的每个 `.html` / `.md` 生成 `source/json/<输入文件 stem>.json`，文件内容是一个 JSON 数组，元素字段如下：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | str | 条目唯一标识，形如 `test_0001` |
+| `source` | str | 人类可读的文档名，用于出处标注 |
+| `section` | str | 章节路径，可为空串 |
+| `content` | str | 忠实于原文的正文，禁止虚构 |
+| `url` | str | 原始链接，缺失时写 `""` |
+| `metadata` | dict | 附加信息，含 `language` / `document_year` / `chunk_type`，允许为空 dict |
+
+禁止出现上述之外的顶层字段。
+
+`source/test.json` 是**人工保留的 schema 样例**（条目演示了上述字段结构，其中未给出 `url`），不是任何 `.html` 的解析产物，**禁止覆盖或删除**；`parse` 只处理 `.html` / `.md`，不会写这个文件。
 
 ## 项目结构
 
@@ -22,20 +55,24 @@
 .
 ├── requirements.txt          # Python 依赖
 ├── .env                      # 环境变量（API 密钥、服务地址），敏感文件
-├── .gitignore                # 忽略 .env、rag_store/、md_output/ 等
+├── .gitignore                # 忽略 .env、rag_store/、source/ 等
 ├── AGENTS.md                 # 项目说明与 AI 助手指南
-└── rag/                      # Python 包：RAG 核心代码
-    ├── __init__.py           # 包说明与模块索引
-    ├── config.py             # 配置加载（.env → Settings）
-    ├── chunking.py           # 解析 Markdown 并切分为文本块
-    ├── clients.py            # Embedding / Rerank / Chat 三个外部 API 客户端
-    ├── store.py              # 基于 numpy 的本地向量库存储与检索
-    ├── ingest.py             # 构建向量索引
-    ├── engine.py             # RAG 检索 + 生成管线
-    ├── cli.py                # 命令行入口
-    └── web.py                # FastAPI Web 服务与单文件前端
-├── md_output/                # 教材单页 Markdown 输入数据
-└── rag_store/                # 构建好的向量索引（可重新生成）
+├── rag/                      # Python 包：RAG 核心代码
+│   ├── __init__.py           # 包说明与模块索引
+│   ├── config.py             # 配置加载（.env → Settings）
+│   ├── parse.py              # 解析 source/ 原始资料并用大模型重写为结构化 JSON
+│   ├── chunking.py           # 载入 source/json 结构化 JSON 并切分为文本块
+│   ├── clients.py            # Embedding / Rerank / Chat 三个外部 API 客户端
+│   ├── store.py              # 基于 numpy 的本地向量库存储与检索
+│   ├── ingest.py             # 构建向量索引
+│   ├── engine.py             # RAG 检索 + 生成管线
+│   ├── cli.py                # 命令行入口
+│   └── web.py                # FastAPI Web 服务与单文件前端
+├── source/                   # 原始资料与解析产物
+│   ├── test.html             # 示例原始文件
+│   ├── test.json             # 人工保留的 schema 样例，勿覆盖
+│   └── json/                 # parse 产物：<stem>.json（由 python -m rag.parse 生成）
+└── rag_store/                # 构建好的向量索引（由 python -m rag.ingest 生成，可重建）
 ```
 
 项目没有 `pyproject.toml`、`setup.py`、`package.json`、`Cargo.toml` 等构建文件，也没有测试文件或 README。
@@ -45,7 +82,7 @@
 - Python 3.10+
 - 主要依赖（见 `requirements.txt`）：
   - `fastapi>=0.110` + `uvicorn>=0.29`：Web 服务
-  - `openai>=1.30`：OpenAI 兼容的 Embedding 与 Chat 客户端
+  - `openai>=1.30`：OpenAI 兼容的 Embedding 与 Chat 客户端（`parse` 的 JSON 重写也走 Chat 接口）
   - `numpy>=1.26`：向量矩阵运算与本地向量库
   - `httpx>=0.27`：Rerank 接口 HTTP 调用
   - `tqdm>=4.66`：索引构建进度条
@@ -53,34 +90,38 @@
 
 ## 运行时架构
 
-1. **数据层**：`md_output/<书名>/<书名>:<副标题><页码>.md`（教材答案类无副标题）
-   - 每页 Markdown 的正文位于 ````text ... ```` 代码块内。
-   - 页码通过文件名中最后一组连续数字推断（如 `必修2:遗传与进化100.md` → 100）。
-   - `index.md` 文件会被跳过。
+1. **数据层**：`source/` 下由使用者放入的 `.html` / `.md` 原始资料，以及 `source/json/<stem>.json` 结构化重写产物（见上文 JSON 契约）。每个条目自带 `source`（文档名）、`section`（章节）与 `url`（原始链接）。
 
-2. **分块**：`rag/chunking.py`
-   - 默认 `chunk_size=800`、`overlap=100`。
-   - 优先按空行（段落）边界切分；单段过长时按字符硬切；相邻块保留重叠。
-   - 每个 `Chunk` 携带 `id`、`book`、`page`、`chunk_index`、`content`、`metadata`。
+2. **解析**：`rag/parse.py`
+   - 扫描 `source/` 下的 `.html` / `.md`，调用 Chat API 将原始内容重写为结构化 JSON 数组。
+   - `content` 必须忠实原文、不得虚构；`url` 缺失时写 `""`。
+   - 产物写入 `source/json/<输入文件 stem>.json`。
 
-3. **向量化与索引**：`rag/ingest.py` → `rag/store.py`
+3. **分块**：`rag/chunking.py`
+   - 载入 `source/json/` 下的结构化 JSON 并切分。
+   - 默认 `chunk_size=800`、`overlap=100`；优先按空行（段落）边界切分，单段过长时按字符硬切，相邻块保留重叠。
+   - 每个 `Chunk` 携带 `id`、`source`、`section`、`url`、`chunk_index`、`content`、`metadata`（`to_dict` 顺序即此序）；`Chunk.from_dict` 对缺失的 `section` / `url` / `metadata` 分别容错为 `""` / `""` / `{}`。
+
+4. **向量化与索引**：`rag/ingest.py` → `rag/store.py`
    - 使用 bge-m3 类 Embedding 模型将文本块批量向量化。
    - 向量按行做 L2 归一化后保存为 `rag_store/vectors.npy`。
    - 文本块保存为 `rag_store/chunks.json`。
-   - 元信息保存为 `rag_store/meta.json`。
+   - 元信息保存为 `rag_store/meta.json`，键为 `chunk_count`、`dim`、`sources`、`built_at`（`sources` 是去重排序后的 `chunk.source` 列表）。
+   - 每次运行都会全量重建索引，没有增量更新。
 
-4. **检索与生成**：`rag/engine.py`
+5. **检索与生成**：`rag/engine.py`
    - 查询向量化 → 余弦相似度 top-20 召回 → bge-reranker 重排序取 top-6 → 组装 prompt → kimi-for-coding 流式生成答案。
+   - 对外 API：`RAGEngine(settings, store_dir)`；`retrieve(question, top_k=20, top_n=6)` 返回 `{"chunk", "rerank_score", "vector_score"}` 列表；`build_messages(question, passages)`；`stream_answer(question, passages=None)`；模块级 `format_source(chunk)` 返回「文档名（章节） URL」——`section` 或 `url` 为空时省略该片段，各片段以单空格连接后 `strip`。`cli.py` 与 `web.py` 都用它生成出处展示。
 
-5. **客户端**：`rag/clients.py`
+6. **客户端**：`rag/clients.py`
    - `EmbeddingClient`：OpenAI 兼容接口，支持 `base64` 与 `float` 返回，可配置是否发送 `dimensions` 参数。
    - `RerankClient`：Cohere 兼容 `/rerank` 接口。
-   - `ChatClient`：OpenAI 兼容流式对话接口。
+   - `ChatClient`：OpenAI 兼容流式对话接口，既用于 `parse` 的 JSON 重写，也用于最终答案生成。
    - 所有调用带 3 次指数退避重试（1s、2s、4s）。
 
-6. **交互层**：
-   - `rag/cli.py`：单次问答或交互式 REPL。
-   - `rag/web.py`：FastAPI 服务，提供 `/` 聊天页面、`POST /api/chat` SSE 流式回答、`GET /api/stats` 索引统计。
+7. **交互层**：
+   - `rag/cli.py`：单次问答或交互式 REPL，答案后列出去重后的出处。
+   - `rag/web.py`：FastAPI 服务，提供 `/` 聊天页面、`POST /api/chat` SSE 流式回答（事件 `type` 为 `token` / `sources` / `error`，末尾 `data: [DONE]`）、`GET /api/stats` 索引统计（返回 `{"ready": true, **meta.json 内容}`）。
 
 ## 配置
 
@@ -102,6 +143,7 @@
 |---------|--------|------|
 | `API_BASE_URL` | `https://api.kimi.com/coding/v1` | LLM base URL |
 | `API_MODEL` | `kimi-for-coding` | LLM 模型名 |
+| `LLM_THINKING_TYPE` | `disabled` | LLM thinking 模式 |
 | `EMBEDDING_MODEL` | `bge-m3` | Embedding 模型名 |
 | `EMBEDDING_DIM` | `1024` | 向量维度 |
 | `EMBEDDING_TOKEN_LIMIT` | `8192` | Embedding 输入 token 上限 |
@@ -109,7 +151,7 @@
 | `EMBEDDING_USE_BASE64` | `True` | Embedding 返回是否使用 base64 编码 |
 | `RERANK_MODEL` | `bge-reranker-v2-m3` | Rerank 模型名 |
 
-当前 `rag_store/meta.json` 显示索引包含 7 本书、1852 个文本块、1024 维向量，构建于 2026-07-26 09:59。
+当前 `rag_store/` 已构建：18 个文本块、1024 维，来源为 `test.html`（由 `source/json/test.json` 切分而来）。新增资料后需重跑 `python -m rag.parse` 与 `python -m rag.ingest`；在索引建好之前 `cli` 与 `web` 的提问都会失败，`GET /api/stats` 会返回 `ready: false`。
 
 ## 常用命令
 
@@ -119,21 +161,40 @@
 pip install -r requirements.txt
 ```
 
+### 解析原始资料
+
+```bash
+# 解析 source/ 下的 .html / .md，重写为 source/json/<stem>.json
+python -m rag.parse
+
+# 自定义输入/输出目录，或强制重解析
+python -m rag.parse --input-dir ./source --output-dir ./source/json --force
+```
+
+需要先配置好 LLM（`KIMI_API_KEY` 等）才能运行；每个原始文件都会调用一次 Chat API。产物已存在且比输入文件新时会自动跳过，`--force` 可强制重解析。产物统一落在 `source/json/`，`source/test.json` 是人工保留的 schema 样例，`parse` 不会写它。
+
 ### 构建/重建索引
 
 ```bash
-# 使用默认输入目录 ./md_output 与输出目录 ./rag_store
+# 使用默认输入目录 ./source/json 与输出目录 ./rag_store
 python -m rag.ingest
 
 # 自定义目录与分块参数
-python -m rag.ingest --input-dir ./md_output --store-dir ./rag_store --chunk-size 800 --overlap 100
+python -m rag.ingest --input-dir ./source/json --store-dir ./rag_store --chunk-size 800 --overlap 100
 ```
+
+### 新增资料（日常更新流程）
+
+1. 把 `.html` / `.md` 文件放进 `source/`。
+2. `python -m rag.parse` 生成/更新 `source/json/<stem>.json`。
+3. `python -m rag.ingest` 全量重建 `rag_store/`。
+4. 重启 Web 服务以载入新索引（见下节 `pm2 restart rag-web`）。
 
 ### 命令行问答
 
 ```bash
 # 单次问答
-python -m rag.cli "兴奋在神经元之间是如何传递的?"
+python -m rag.cli "联合国大会的表决程序是怎样的?"
 
 # 交互模式（输入 q / quit / exit 退出）
 python -m rag.cli
@@ -186,11 +247,12 @@ sudo -u deploy pm2 logs rag-web
 | 文件 | 职责 |
 |------|------|
 | `rag/config.py` | 定义 `Settings` dataclass，从 `.env` 加载配置；定义 `ConfigurationError`。 |
-| `rag/chunking.py` | 定义 `Chunk` 数据类；扫描 `md_output` 并按页分块。 |
+| `rag/parse.py` | 扫描 `source/` 原始资料，调用 Chat API 重写为结构化 JSON 并写入 `source/json/`。 |
+| `rag/chunking.py` | 定义 `Chunk` 数据类；载入 `source/json` 下的结构化 JSON 并切分为文本块。 |
 | `rag/clients.py` | 封装三个外部 HTTP API 客户端，统一重试逻辑。 |
 | `rag/store.py` | `VectorStore`：本地向量库，负责 save / load / search / meta。 |
 | `rag/ingest.py` | 端到端索引构建脚本。 |
-| `rag/engine.py` | `RAGEngine`：检索、重排、prompt 组装、流式生成。 |
+| `rag/engine.py` | `RAGEngine`：检索、重排、prompt 组装、流式生成；模块级 `format_source`。 |
 | `rag/cli.py` | argparse 命令行入口。 |
 | `rag/web.py` | FastAPI 应用与内嵌 HTML/JS 前端;回答气泡通过 CDN 引入 marked + DOMPurify 渲染 Markdown(CDN 不可用时回退纯文本)。 |
 
@@ -208,16 +270,17 @@ sudo -u deploy pm2 logs rag-web
 
 项目中没有单元测试、集成测试或测试框架配置。验证功能的方式是：
 
-1. 运行 `python -m rag.ingest` 成功构建索引。
-2. 运行 `python -m rag.cli "一个生物学问题"` 检查是否能正常检索并生成带出处的答案。
-3. 启动 `python -m rag.web` 并在浏览器中通过页面测试 SSE 回答。
+1. 运行 `python -m rag.parse`，确认 `source/json/` 下生成了结构合法的 JSON 数组。
+2. 运行 `python -m rag.ingest` 成功构建索引（`rag_store/meta.json` 出现且 `chunk_count` 大于 0）。
+3. 运行 `python -m rag.cli "一个模联问题"` 检查是否能正常检索并生成带出处链接的答案。
+4. 启动 `python -m rag.web` 并在浏览器中通过页面测试 SSE 回答。
 
 如需新增测试，建议自行创建 `tests/` 目录并引入 `pytest`。
 
 ## 安全注意事项
 
-- `.env` 文件包含 API 密钥，已加入 `.gitignore`，切勿提交到版本控制。
-- `rag_store/` 与 `md_output/` 也已在 `.gitignore` 中，分别为可重新生成的索引数据与原始教材输入数据。
+- `.env` 文件包含 API 密钥，已加入 `.gitignore`，切勿提交到版本控制，也不要把密钥写进日志或代码。
+- `rag_store/` 与 `source/` 也已在 `.gitignore` 中，分别为可重新生成的索引数据与原始资料/解析产物；不要修改 `.gitignore`。
 - `rag/web.py` 默认仅监听 `127.0.0.1`，如需暴露到公网请谨慎考虑鉴权与 HTTPS。
 - Web 接口未做访问控制，生产环境部署时应添加反向代理、限流与身份验证。
 
@@ -226,4 +289,8 @@ sudo -u deploy pm2 logs rag-web
 - 没有持久化数据库，所有索引与向量以本地文件形式存放在 `rag_store/`。
 - 向量检索为全量矩阵乘法，索引规模增大时检索延迟会线性上升。
 - 没有测试套件，也没有 CI/CD 配置。
-- Web 前端为单文件内嵌 HTML/JS，没有前端构建流程。
+- Web 前端为单文件内嵌 HTML/JS，没有前端构建流程；Markdown 渲染依赖 CDN 上的 marked + DOMPurify，CDN 不可用时回退纯文本。
+- `parse` 依赖大模型重写原始资料，结果可能遗漏细节或引入偏差，且每个文件都要调用一次 API（耗时与计费）；入库前应人工抽查 `source/json/` 产物。
+- 索引为全量重建（`ingest` 每次重扫全部 `source/json/`）；`parse` 有基于修改时间的增量跳过，但切分粒度由大模型决定，同一文件重解析的条目数会变化（实测同一输入一次 20 条、一次 18 条）。
+- 重排结果没有分数阈值：问题与已收录资料完全无关时仍会返回 top-N 段落（分数接近 0），只能靠 system prompt 让模型回答「未找到」。若要硬性拒答，需在 `engine.retrieve` 中加分数过滤。
+- 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。

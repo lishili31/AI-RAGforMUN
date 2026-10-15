@@ -4,7 +4,7 @@
 命令行问答入口。
 
 Usage:
-    python -m rag.cli "兴奋在神经元之间是如何传递的?"   # 单次问答
+    python -m rag.cli "决议草案的提交需要多少赞成票?"   # 单次问答
     python -m rag.cli                                  # 交互模式(输入 q 退出)
 """
 
@@ -34,7 +34,7 @@ def answer_once(engine: RAGEngine, question: str) -> None:
     print("\r" + " " * 20 + "\r", end="", flush=True)
 
     if not passages:
-        print("未检索到相关教材内容。")
+        print("未检索到相关文件内容。")
         return
 
     print("回答:\n")
@@ -48,12 +48,12 @@ def answer_once(engine: RAGEngine, question: str) -> None:
         source = format_source(item["chunk"])
         if source not in seen:
             seen.add(source)
-            print(f"  - {source}(相关度 {item['rerank_score']:.3f})")
+            print(f"  - {source} (相关度 {item['rerank_score']:.3f})")
     print()
 
 
 def repl(engine: RAGEngine) -> None:
-    print("高中生物教材问答(输入 q 或 quit 退出)")
+    print("模联资料问答(输入 q 或 quit 退出)")
     while True:
         try:
             question = input("\n问题> ").strip()
@@ -72,7 +72,7 @@ def repl(engine: RAGEngine) -> None:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="rag.cli", description="高中生物教材 RAG 命令行问答"
+        prog="rag.cli", description="模拟联合国资料 RAG 命令行问答"
     )
     parser.add_argument("question", nargs="?", default="", help="要提问的问题(省略则进入交互模式)")
     parser.add_argument("--store-dir", type=str, default="./rag_store", help="索引目录")

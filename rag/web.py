@@ -26,7 +26,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .config import PROJECT_ROOT, ConfigurationError, Settings
-from .engine import RAGEngine, format_source
+from .engine import RAGEngine, format_source, format_source_title
 from .store import VectorStore
 
 logging.basicConfig(
@@ -39,7 +39,7 @@ logger = logging.getLogger("rag.web")
 
 STORE_DIR: Path = PROJECT_ROOT / "rag_store"
 
-app = FastAPI(title="高中生物教材问答")
+app = FastAPI(title="模拟联合国资料问答")
 _engine: Optional[RAGEngine] = None
 _store_dir: Path = STORE_DIR
 
@@ -76,7 +76,7 @@ def chat_event_stream(question: str) -> Iterator[str]:
         return
 
     if not passages:
-        yield sse({"type": "token", "content": "未检索到相关教材内容,请换个问法试试。"})
+        yield sse({"type": "token", "content": "未检索到相关文件内容,请换个问法试试。"})
         yield "data: [DONE]\n\n"
         return
 
@@ -91,6 +91,8 @@ def chat_event_stream(question: str) -> Iterator[str]:
     sources = [
         {
             "source": format_source(item["chunk"]),
+            "label": format_source_title(item["chunk"]),
+            "url": (item["chunk"].url or "").strip(),
             "score": round(item["rerank_score"], 4),
         }
         for item in passages
@@ -126,7 +128,7 @@ INDEX_HTML: str = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>高中生物教材问答</title>
+<title>模拟联合国资料问答</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -180,6 +182,7 @@ INDEX_HTML: str = """<!DOCTYPE html>
     display: inline-block; background: #eef5f1; color: #2f6b4f;
     border-radius: 4px; padding: 2px 8px; margin: 3px 6px 0 0;
   }
+  .sources .tag a { color: inherit; text-decoration: underline; }
   .error { color: #c0392b; }
   #input-bar {
     background: #fff; border-top: 1px solid #e4e7eb; padding: 12px 20px;
@@ -200,16 +203,16 @@ INDEX_HTML: str = """<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>高中生物教材问答</h1>
-  <span id="stats">基于人教版教材 · RAG 检索增强</span>
+  <h1>模拟联合国资料问答</h1>
+  <span id="stats">基于模联文件 · RAG 检索增强</span>
 </header>
 <div id="chat"></div>
 <div id="input-bar">
   <div class="row">
-    <input id="question" placeholder="例如:兴奋在神经元之间是如何传递的?" autofocus>
+    <input id="question" placeholder="例如:决议草案的提交需要多少赞成票?" autofocus>
     <button id="send">提问</button>
   </div>
-  <div class="hint">答案由教材原文检索生成,出处以 Markdown 引用格式标注 · 支持 Markdown 渲染 · Enter 发送</div>
+  <div class="hint">答案由模联文件原文检索生成,出处以 Markdown 引用格式标注 · 支持 Markdown 渲染 · Enter 发送</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
@@ -231,9 +234,15 @@ function renderMd(text) {
   return div.innerHTML;
 }
 
+// 出处标签用:最小化 HTML 转义,防止文件名/链接内容注入
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, c => (
+    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
 fetch('api/stats').then(r => r.json()).then(s => {
   if (s.ready) document.getElementById('stats').textContent =
-    `已索引 ${s.chunk_count} 个片段 · ${s.books.length} 本教材`;
+    `已索引 ${s.chunk_count} 个片段 · ${s.sources.length} 份文档`;
 }).catch(() => {});
 
 function addMsg(role) {
@@ -288,17 +297,23 @@ async function ask() {
         } else if (data.type === 'sources') {
           const sourcesBox = document.createElement('div');
           sourcesBox.className = 'sources';
-          sourcesBox.innerHTML = '出处: ' + data.sources.map(s =>
-            `<span class="tag">${s.source}</span>`).join('');
+          sourcesBox.innerHTML = '出处: ' + data.sources.map(s => {
+            const label = escapeHtml(s.label || s.source);
+            const url = String(s.url || '');
+            const inner = (url.startsWith('http://') || url.startsWith('https://'))
+              ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(url)}">${label}</a>`
+              : label;
+            return `<span class="tag">${inner}</span>`;
+          }).join('');
           bubble.appendChild(sourcesBox);
         } else if (data.type === 'error') {
-          bubble.innerHTML = `<span class="error">${data.message}</span>`;
+          bubble.innerHTML = `<span class="error">${escapeHtml(data.message)}</span>`;
         }
         chat.scrollTop = chat.scrollHeight;
       }
     }
   } catch (e) {
-    bubble.innerHTML = `<span class="error">请求失败: ${e.message}</span>`;
+    bubble.innerHTML = `<span class="error">请求失败: ${escapeHtml(e.message)}</span>`;
   }
   busy = false; sendBtn.disabled = false; input.focus();
 }
@@ -317,7 +332,7 @@ def index() -> str:
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="rag.web", description="高中生物教材 RAG Web 问答")
+    parser = argparse.ArgumentParser(prog="rag.web", description="模拟联合国资料 RAG Web 问答")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--store-dir", type=str, default=str(STORE_DIR), help="索引目录")
