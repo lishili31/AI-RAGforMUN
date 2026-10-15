@@ -75,11 +75,6 @@ def chat_event_stream(question: str) -> Iterator[str]:
         yield sse({"type": "error", "message": f"检索失败: {e}"})
         return
 
-    if not passages:
-        yield sse({"type": "token", "content": "已收录的资料中证据不足,无法回答该问题,请补充资料或换个问法。"})
-        yield "data: [DONE]\n\n"
-        return
-
     try:
         for token in engine.stream_answer(question, passages):
             yield sse({"type": "token", "content": token})
@@ -88,16 +83,21 @@ def chat_event_stream(question: str) -> Iterator[str]:
         yield sse({"type": "error", "message": f"生成失败: {e}"})
         return
 
-    sources = [
-        {
-            "source": format_source(item["chunk"]),
-            "label": format_source_title(item["chunk"]),
-            "url": (item["chunk"].url or "").strip(),
-            "score": round(item["rerank_score"], 4),
-        }
-        for item in passages
-    ]
-    yield sse({"type": "sources", "sources": sources})
+    if passages:
+        yield sse(
+            {
+                "type": "sources",
+                "sources": [
+                    {
+                        "source": format_source(item["chunk"]),
+                        "label": format_source_title(item["chunk"]),
+                        "url": (item["chunk"].url or "").strip(),
+                        "score": round(item["rerank_score"], 4),
+                    }
+                    for item in passages
+                ],
+            }
+        )
     yield "data: [DONE]\n\n"
 
 
@@ -212,7 +212,7 @@ INDEX_HTML: str = """<!DOCTYPE html>
     <input id="question" placeholder="例如:决议草案的提交需要多少赞成票?" autofocus>
     <button id="send">提问</button>
   </div>
-  <div class="hint">答案由模联文件原文检索生成,出处以 Markdown 引用格式标注 · 支持 Markdown 渲染 · Enter 发送</div>
+  <div class="hint">仅支持规则查询、语法修改(含英语)与信息查询,不提供决策建议,也不代写决议草案/立场文件等文件 · 答案基于已收录文件原文并标注出处 · Enter 发送</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>

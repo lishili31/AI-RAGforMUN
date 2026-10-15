@@ -9,6 +9,7 @@
 - 目标用户：参加模拟联合国活动、需要查询会议规则与文件事实的代表与组织者。
 - 答案语言：简体中文。
 - 答案必须基于文件原文，并在关键论断处标注出处（文档名、章节与真实原始链接），使用 Markdown 引用格式，例如 `> 文档名（章节） https://example.org/doc`。
+- **用途边界**（由 `rag/engine.py` 的 `SYSTEM_PROMPT` 强制）：助手只做三件事——① 规则查询（议事规则、会议程序、表决方式、文件效力与格式）② 语法修改（尤其是英语，不要求文件原文、不标注出处）③ 信息查询（已收录文件中的人物、机构、会议、数据等事实）。决策类请求（投票建议、立场判断、策略分析）与代写文件类请求（决议草案、立场文件、工作文件、修正案、演讲稿、邮件、报告等成品文书）一律拒绝，回答固定的拒绝话术。
 
 主要入口：
 
@@ -111,7 +112,8 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 
 5. **检索与生成**：`rag/engine.py`
    - 查询向量化 → 余弦相似度 top-30 召回 → bge-reranker 重排序取 top-6 → 丢弃重排分数低于 `RERANK_SCORE_THRESHOLD`（0.30）的段落 → 组装 prompt → kimi-for-coding 流式生成答案。
-   - 候选中没有任何段落达到阈值时，`retrieve` 返回空列表，调用方直接提示「已收录的资料中证据不足」并**不调用大模型**，避免在缺乏证据时编造答案。
+   - 候选中没有任何段落达到阈值时，`retrieve` 返回空列表且**不注入任何原文**；调用方仍会把控制权交给大模型（上下文里只有 `(未检索到任何文件原文)` 占位），由 `SYSTEM_PROMPT` 判断是拒绝越界请求、完成语法修改，还是回答「在已收录的文件中未找到相关内容」。这一取舍是为了让「语法修改」这类不需要文件原文的正当用途可用。
+   - `SYSTEM_PROMPT` 是本项目的行为边界所在：分「允许的用途」（规则查询 / 语法修改 / 信息查询）、「必须拒绝的用途」（决策与判断、代写文件、无关请求，附固定拒绝话术）、「回答规则」三节。改动它等于改动产品能力范围，需同步本节与「项目概述」的用途边界说明。
    - 对外 API：`RAGEngine(settings, store_dir)`；`retrieve(question, top_k=30, top_n=6)` 返回 `{"chunk", "rerank_score", "vector_score"}` 列表；`build_messages(question, passages)`；`stream_answer(question, passages=None)`；模块级 `format_source(chunk)` 返回「文档名（章节） URL」、`format_source_title(chunk)` 返回「文档名（章节）」——`section` 或 `url` 为空时省略该片段，各片段以单空格连接后 `strip`。`cli.py` 与 `web.py` 都用它们生成出处展示。
 
 6. **客户端**：`rag/clients.py`
@@ -121,8 +123,8 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
    - 所有调用带 3 次指数退避重试（1s、2s、4s）。
 
 7. **交互层**：
-   - `rag/cli.py`：单次问答或交互式 REPL，答案后列出去重后的出处。
-   - `rag/web.py`：FastAPI 服务，提供 `/` 聊天页面、`POST /api/chat` SSE 流式回答（事件 `type` 为 `token` / `sources` / `error`，末尾 `data: [DONE]`）、`GET /api/stats` 索引统计（返回 `{"ready": true, **meta.json 内容}`）。
+   - `rag/cli.py`：单次问答或交互式 REPL，答案后列出去重后的出处；检索为空时不再提前返回，仍调用大模型，因此语法修改与越界拒绝在 CLI 下同样生效（此时不打印「出处」段）。
+   - `rag/web.py`：FastAPI 服务，提供 `/` 聊天页面、`POST /api/chat` SSE 流式回答（事件 `type` 为 `token` / `sources` / `error`，末尾 `data: [DONE]`）、`GET /api/stats` 索引统计（返回 `{"ready": true, **meta.json 内容}`）。`sources` 事件**仅在检索到段落时**发送，无检索结果时前端不会渲染出处栏。页面标题栏下方的提示行写明了「仅支持规则查询、语法修改(含英语)与信息查询」。
 
 ## 配置
 
@@ -274,7 +276,9 @@ sudo -u deploy pm2 logs rag-web
 1. 运行 `python -m rag.parse`，确认 `source/json/` 下生成了结构合法的 JSON 数组。
 2. 运行 `python -m rag.ingest` 成功构建索引（`rag_store/meta.json` 出现且 `chunk_count` 大于 0）。
 3. 运行 `python -m rag.cli "一个模联问题"` 检查是否能正常检索并生成带出处链接的答案。
-4. 启动 `python -m rag.web` 并在浏览器中通过页面测试 SSE 回答。
+4. 运行 `python -m rag.cli "<一句有语病的英语>"`，确认「语法修改」在没有任何检索结果时也能作答。
+5. 运行 `python -m rag.cli "帮我写一份决议草案"` 或 `"我该不该支持这个动议"`，确认得到固定的拒绝话术。
+6. 启动 `python -m rag.web` 并在浏览器中通过页面测试 SSE 回答。
 
 如需新增测试，建议自行创建 `tests/` 目录并引入 `pytest`。
 
@@ -295,3 +299,5 @@ sudo -u deploy pm2 logs rag-web
 - 索引为全量重建（`ingest` 每次重扫全部 `source/json/`）；`parse` 有基于修改时间的增量跳过，但切分粒度由大模型决定，同一文件重解析的条目数会变化（实测同一输入一次 20 条、一次 18 条）。
 - 重排分数阈值 `RERANK_SCORE_THRESHOLD=0.30` 是经验值：当前语料与 bge-reranker-v2-m3 下能把无关问题挡掉（实测无关问题重排最高分 0.0000–0.0001，相关问题 0.59–0.92）。换 rerank 模型或换语料后需重新标定，阈值过高会把弱相关但正确的段落一并滤掉。
 - 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。
+- 用途边界（拒绝决策、拒绝代写文件）只靠 `SYSTEM_PROMPT` 约束，是提示词层面的软限制，不是访问控制：在提示词注入或强指令下仍可能被绕过，需要硬保证时应在服务层加拦截或人工审核。
+- 检索为空时仍会调用一次大模型（为了支持不依赖原文的语法修改），因此无关问题也会消耗一次 API 调用并多几秒延迟；不再有「无检索结果就直接返回」的快速路径。同理，判定某个问题是否越界也由大模型完成，代码里没有关键词黑名单。

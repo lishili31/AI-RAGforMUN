@@ -28,19 +28,18 @@ logger = logging.getLogger("rag.cli")
 
 
 def answer_once(engine: RAGEngine, question: str) -> None:
-    """检索 → 流式输出答案 → 列出处"""
+    """检索 → 流式输出答案 → 列出处;无检索结果时也调用大模型,由提示词决定应答或拒绝"""
     print("\n检索中...", end="", flush=True)
     passages = engine.retrieve(question)
     print("\r" + " " * 20 + "\r", end="", flush=True)
-
-    if not passages:
-        print("已收录的资料中证据不足,无法回答该问题。")
-        return
 
     print("回答:\n")
     for token in engine.stream_answer(question, passages):
         print(token, end="", flush=True)
     print("\n")
+
+    if not passages:
+        return
 
     print("出处:")
     seen: set[str] = set()
@@ -53,7 +52,7 @@ def answer_once(engine: RAGEngine, question: str) -> None:
 
 
 def repl(engine: RAGEngine) -> None:
-    print("模联资料问答(输入 q 或 quit 退出)")
+    print("模联资料问答: 仅支持规则查询、语法修改(含英语)与信息查询 · 输入 q 或 quit 退出")
     while True:
         try:
             question = input("\n问题> ").strip()
