@@ -212,7 +212,7 @@ INDEX_HTML: str = """<!DOCTYPE html>
     <input id="question" placeholder="例如:决议草案的提交需要多少赞成票?" autofocus>
     <button id="send">提问</button>
   </div>
-  <div class="hint">仅支持规则查询、语法修改(含英语)与信息查询,不提供决策建议,也不代写决议草案/立场文件等文件 · 答案基于已收录文件原文并标注出处 · Enter 发送</div>
+  <div class="hint">仅支持规则查询、语法修改/中译英润色、信息查询,不提供决策建议,也不代写决议草案/立场文件等文件 · 答案基于已收录文件原文并标注出处 · Enter 发送</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>

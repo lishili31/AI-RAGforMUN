@@ -52,7 +52,7 @@ def answer_once(engine: RAGEngine, question: str) -> None:
 
 
 def repl(engine: RAGEngine) -> None:
-    print("模联资料问答: 仅支持规则查询、语法修改(含英语)与信息查询 · 输入 q 或 quit 退出")
+    print("模联资料问答: 仅支持规则查询、语法修改/中译英润色、信息查询 · 输入 q 或 quit 退出")
     while True:
         try:
             question = input("\n问题> ").strip()
