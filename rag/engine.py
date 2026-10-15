@@ -3,8 +3,9 @@
 """
 RAG 检索 + 生成管线。
 
-流程: 问题 → bge-m3 向量化 → 余弦 top-K → bge-reranker-v2-m3 重排 top-N
-      → 组装带出处标注的 prompt → kimi-for-coding 流式生成中文答案。
+流程: 问题 → bge-m3 向量化 → 余弦 top-K 召回 → bge-reranker-v2-m3 重排 top-N
+      → 丢弃重排分数低于 RERANK_SCORE_THRESHOLD 的段落(全部低于时判定证据不足,不调用大模型)
+      → 组装带出处链接的 prompt → kimi-for-coding 流式生成中文答案。
 """
 
 from __future__ import annotations
@@ -20,8 +21,9 @@ from .store import VectorStore
 
 logger = logging.getLogger("rag.engine")
 
-RETRIEVE_TOP_K: int = 20   # 向量检索召回数
-RERANK_TOP_N: int = 6      # 重排后送入 LLM 的段落数
+RETRIEVE_TOP_K: int = 30   # 向量检索初始候选数
+RERANK_TOP_N: int = 6      # 重排后送入 LLM 的段落数上限
+RERANK_SCORE_THRESHOLD: float = 0.30  # 重排相关性阈值,低于该分数的段落不注入上下文
 
 SYSTEM_PROMPT: str = (
     "你是一位模拟联合国(MUN)学术助手,为参会代表查询议事规则、会议程序与相关事实。\n\n"
@@ -77,6 +79,9 @@ class RAGEngine:
         """
         检索并重排,返回用于生成答案的段落列表。
 
+        重排分数低于 RERANK_SCORE_THRESHOLD 的段落会被丢弃;候选全部低于阈值时
+        返回空列表,由调用方判定证据不足,不再注入无关内容。
+
         每项: {chunk, rerank_score, vector_score}
         """
         query_vector = self.embedder.embed_query(question)
@@ -91,6 +96,8 @@ class RAGEngine:
 
         passages: list[dict] = []
         for doc_index, rerank_score in ranked:
+            if rerank_score < RERANK_SCORE_THRESHOLD:
+                continue
             chunk_index, vector_score = candidates[doc_index]
             passages.append(
                 {
@@ -98,6 +105,12 @@ class RAGEngine:
                     "rerank_score": rerank_score,
                     "vector_score": vector_score,
                 }
+            )
+        if ranked and not passages:
+            logger.info(
+                "重排最高分 %.4f 低于阈值 %.2f,判定证据不足,不注入任何段落",
+                max(score for _, score in ranked),
+                RERANK_SCORE_THRESHOLD,
             )
         return passages
 

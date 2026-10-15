@@ -76,7 +76,7 @@ def chat_event_stream(question: str) -> Iterator[str]:
         return
 
     if not passages:
-        yield sse({"type": "token", "content": "未检索到相关文件内容,请换个问法试试。"})
+        yield sse({"type": "token", "content": "已收录的资料中证据不足,无法回答该问题,请补充资料或换个问法。"})
         yield "data: [DONE]\n\n"
         return
 

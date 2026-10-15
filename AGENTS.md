@@ -110,8 +110,9 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
    - 每次运行都会全量重建索引，没有增量更新。
 
 5. **检索与生成**：`rag/engine.py`
-   - 查询向量化 → 余弦相似度 top-20 召回 → bge-reranker 重排序取 top-6 → 组装 prompt → kimi-for-coding 流式生成答案。
-   - 对外 API：`RAGEngine(settings, store_dir)`；`retrieve(question, top_k=20, top_n=6)` 返回 `{"chunk", "rerank_score", "vector_score"}` 列表；`build_messages(question, passages)`；`stream_answer(question, passages=None)`；模块级 `format_source(chunk)` 返回「文档名（章节） URL」——`section` 或 `url` 为空时省略该片段，各片段以单空格连接后 `strip`。`cli.py` 与 `web.py` 都用它生成出处展示。
+   - 查询向量化 → 余弦相似度 top-30 召回 → bge-reranker 重排序取 top-6 → 丢弃重排分数低于 `RERANK_SCORE_THRESHOLD`（0.30）的段落 → 组装 prompt → kimi-for-coding 流式生成答案。
+   - 候选中没有任何段落达到阈值时，`retrieve` 返回空列表，调用方直接提示「已收录的资料中证据不足」并**不调用大模型**，避免在缺乏证据时编造答案。
+   - 对外 API：`RAGEngine(settings, store_dir)`；`retrieve(question, top_k=30, top_n=6)` 返回 `{"chunk", "rerank_score", "vector_score"}` 列表；`build_messages(question, passages)`；`stream_answer(question, passages=None)`；模块级 `format_source(chunk)` 返回「文档名（章节） URL」、`format_source_title(chunk)` 返回「文档名（章节）」——`section` 或 `url` 为空时省略该片段，各片段以单空格连接后 `strip`。`cli.py` 与 `web.py` 都用它们生成出处展示。
 
 6. **客户端**：`rag/clients.py`
    - `EmbeddingClient`：OpenAI 兼容接口，支持 `base64` 与 `float` 返回，可配置是否发送 `dimensions` 参数。
@@ -264,7 +265,7 @@ sudo -u deploy pm2 logs rag-web
 - 类型注解覆盖率较高，函数参数与返回值通常有类型标注。
 - 常量使用全大写蛇形命名，如 `RETRIEVE_TOP_K`、`EMBED_BATCH_SIZE`。
 - 配置项缺失时抛出 `ConfigurationError`；外部 API 重试失败后抛出 `APIClientError`。
-- 关键数字硬编码在模块顶部常量中（如 `RETRIEVE_TOP_K=20`、`RERANK_TOP_N=6`）。
+- 关键数字硬编码在模块顶部常量中（如 `RETRIEVE_TOP_K=30`、`RERANK_TOP_N=6`、`RERANK_SCORE_THRESHOLD=0.30`）。这些检索参数目前不读 `.env`；如需免改代码调参，要先把它们接进 `Settings`。
 
 ## 测试
 
@@ -292,5 +293,5 @@ sudo -u deploy pm2 logs rag-web
 - Web 前端为单文件内嵌 HTML/JS，没有前端构建流程；Markdown 渲染依赖 CDN 上的 marked + DOMPurify，CDN 不可用时回退纯文本。
 - `parse` 依赖大模型重写原始资料，结果可能遗漏细节或引入偏差，且每个文件都要调用一次 API（耗时与计费）；入库前应人工抽查 `source/json/` 产物。
 - 索引为全量重建（`ingest` 每次重扫全部 `source/json/`）；`parse` 有基于修改时间的增量跳过，但切分粒度由大模型决定，同一文件重解析的条目数会变化（实测同一输入一次 20 条、一次 18 条）。
-- 重排结果没有分数阈值：问题与已收录资料完全无关时仍会返回 top-N 段落（分数接近 0），只能靠 system prompt 让模型回答「未找到」。若要硬性拒答，需在 `engine.retrieve` 中加分数过滤。
+- 重排分数阈值 `RERANK_SCORE_THRESHOLD=0.30` 是经验值：当前语料与 bge-reranker-v2-m3 下能把无关问题挡掉（实测无关问题重排最高分 0.0000–0.0001，相关问题 0.59–0.92）。换 rerank 模型或换语料后需重新标定，阈值过高会把弱相关但正确的段落一并滤掉。
 - 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。

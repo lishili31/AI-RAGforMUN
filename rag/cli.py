@@ -34,7 +34,7 @@ def answer_once(engine: RAGEngine, question: str) -> None:
     print("\r" + " " * 20 + "\r", end="", flush=True)
 
     if not passages:
-        print("未检索到相关文件内容。")
+        print("已收录的资料中证据不足,无法回答该问题。")
         return
 
     print("回答:\n")
