@@ -5,8 +5,8 @@
 
 流程:
 1. 用标准库抽取正文纯文本(HTML 用 html.parser 剥离标签,保留标题层级与表格结构)。
-2. 抽取原始链接(HTML: <meta name="source"> → <link rel="canonical"> → 正文首个外站链接;
-   Markdown: front-matter 的 url: / source:)。
+2. 抽取原始链接(HTML: <meta name="source"> → <link rel="canonical"> → og:url →
+   正文首个外站链接;Markdown: front-matter 的 url: / source:)。
 3. 调用 Chat API(非流式)让模型重写为符合契约的 JSON 数组。
 4. 白名单字段归一后写入 <输出目录>/<输入文件 stem>.json(先写临时文件再原子替换,
    解析失败绝不落半成品)。
@@ -235,7 +235,7 @@ def _extract_attr(tag: str, name: str) -> str:
 
 
 def _extract_html_url(raw: str, links: list[str]) -> str:
-    """HTML 链接抽取: <meta name="source"> → <link rel="canonical"> → 正文首个外站链接"""
+    """HTML 链接抽取: <meta name="source"> → <link rel="canonical"> → og:url → 正文首个外站链接"""
     for tag in re.findall(r"<meta\b[^>]*>", raw, flags=re.IGNORECASE):
         if _extract_attr(tag, "name").lower() == "source":
             content: str = _extract_attr(tag, "content")
@@ -247,6 +247,13 @@ def _extract_html_url(raw: str, links: list[str]) -> str:
             href: str = _extract_attr(tag, "href")
             if href:
                 return href
+
+    for tag in re.findall(r"<meta\b[^>]*>", raw, flags=re.IGNORECASE):
+        key: str = _extract_attr(tag, "property") or _extract_attr(tag, "name")
+        if key.lower() == "og:url":
+            content: str = _extract_attr(tag, "content")
+            if content:
+                return content
 
     for link in links:
         if re.match(r"^https?://", link, flags=re.IGNORECASE):
@@ -382,7 +389,7 @@ def parse_document(path: Path, chat: ChatClient) -> list[dict]:
 
     if not url:
         logger.warning(
-            "%s: 未找到原始链接(meta source / canonical / 正文外链 / front-matter),url 写空字符串",
+            "%s: 未找到原始链接(meta source / canonical / og:url / 正文外链 / front-matter),url 写空字符串",
             path.name,
         )
     if not text.strip():
