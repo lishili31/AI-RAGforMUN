@@ -21,8 +21,8 @@ import sys
 from pathlib import Path
 from typing import Iterator, Optional
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .config import PROJECT_ROOT, ConfigurationError, Settings
@@ -38,6 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger("rag.web")
 
 STORE_DIR: Path = PROJECT_ROOT / "rag_store"
+REFERENCE_DIR: Path = PROJECT_ROOT / "source"
 
 app = FastAPI(title="模拟联合国资料问答")
 _engine: Optional[RAGEngine] = None
@@ -121,6 +122,25 @@ def api_stats() -> dict:
     if not meta:
         return {"ready": False, "message": "索引未构建,请先运行 python -m rag.ingest"}
     return {"ready": True, **meta}
+
+
+@app.api_route("/{filename}", methods=["GET", "HEAD"])
+def serve_reference_file(filename: str) -> FileResponse:
+    """直接提供 source/ 下的 PDF 原件,供答案的出处链接打开
+
+    nginx 在 proxy_pass 时剥离 /rag/ 前缀,因此线上地址
+    https://www.stringandstick.cn/rag/<文件名>.pdf 命中本路由。
+    只提供 source/ 目录下的 .pdf,其余一律 404。
+    """
+    reference_dir: Path = REFERENCE_DIR.resolve()
+    path: Path = (reference_dir / filename).resolve()
+    if (
+        path.suffix.lower() != ".pdf"
+        or path.parent != reference_dir
+        or not path.is_file()
+    ):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(path, media_type="application/pdf")
 
 
 INDEX_HTML: str = """<!DOCTYPE html>

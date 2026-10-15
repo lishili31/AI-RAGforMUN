@@ -52,7 +52,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 
 注意：结构化 JSON 必须放进 `source/json/`——那才是 `ingest` 的输入目录（`--input-dir` 默认值），放在 `source/` 根目录下的 JSON 不会被索引。另外 `source/test.json` 的前两个条目与 `source/json/北大学标PKUNMUN2025_学术标准手册.json` 的前两条 `id` 相同，若把 `--input-dir` 指向 `source/` 会让这两条重复入库。
 
-当前 `source/json/北大学标PKUNMUN2025_学术标准手册.json` 的 299 个条目都省略了 `url` 字段（`chunking` 按空串容错），因此该文档的出处只能标注文档名与章节，没有原始链接。
+当前 `source/json/北大学标PKUNMUN2025_学术标准手册.json` 的 299 个条目都填了同一个 `url`：`https://www.stringandstick.cn/rag/北大学标PKUNMUN2025_学术标准手册.pdf`，即 `source/北大学标PKUNMUN2025_学术标准手册.pdf` 由 `rag/web.py` 对外提供的地址（见「交互层」）。出处链接因此指向手册 PDF 原件；`url` 为空串时 `format_source` 会省略该片段，只标注文档名与章节。
 
 ## 项目结构
 
@@ -75,6 +75,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 │   └── web.py                # FastAPI Web 服务与单文件前端
 ├── source/                   # 原始资料与解析产物
 │   ├── test.json             # 人工保留的 schema 样例，勿覆盖
+│   ├── 北大学标…手册.pdf      # 手册 PDF 原件，经 web 对外提供，作为出处链接
 │   └── json/                 # 结构化 JSON：北大学标PKUNMUN2025_学术标准手册.json
 └── rag_store/                # 构建好的向量索引（由 python -m rag.ingest 生成，可重建）
 ```
@@ -129,6 +130,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 7. **交互层**：
    - `rag/cli.py`：单次问答或交互式 REPL，答案后列出去重后的出处；检索为空时不再提前返回，仍调用大模型，因此语言处理与越界拒绝在 CLI 下同样生效（此时不打印「出处」段）。REPL 启动横幅写明支持范围。
    - `rag/web.py`：FastAPI 服务，提供 `/` 聊天页面、`POST /api/chat` SSE 流式回答（事件 `type` 为 `token` / `sources` / `error`，末尾 `data: [DONE]`）、`GET /api/stats` 索引统计（返回 `{"ready": true, **meta.json 内容}`）。`sources` 事件**仅在检索到段落时**发送，无检索结果时前端不会渲染出处栏。页面标题栏下方的提示行写明了「仅支持规则查询、语法修改/中译英润色、信息查询」。
+   - `rag/web.py` 的 `GET /{filename}`（`serve_reference_file`）：把 `source/` 下的 PDF 原件作为静态文件发给浏览器，只放行 `.pdf` 且路径必须落在 `source/` 下（其余 404，含 `%2F` 编码的目录穿越）。因为 nginx 的 `location /rag/` 用 `proxy_pass http://127.0.0.1:5000/` 剥掉了 `/rag/` 前缀，应用根路径上的这个路由对外就表现为 `https://www.stringandstick.cn/rag/<文件名>.pdf`——索引里的 `url` 正是这个地址。新增需要被引用的 PDF 时，把它放进 `source/` 并把该地址填进对应 JSON 条目的 `url` 字段即可，不必改 nginx。
 
 ## 配置
 
@@ -284,6 +286,7 @@ sudo -u deploy pm2 logs rag-web
 5. 运行 `python -m rag.cli "把这句中文译成英语:<一句话>"` 与 `"帮我润色这句英语:<一句话>"`，确认中译英与润色同样可用（语言处理不依赖检索结果）。
 6. 运行 `python -m rag.cli "帮我写一份决议草案"`、`"我该不该支持这个动议"` 与 `"帮我写一段英文发言稿"`，确认都得到固定的拒绝话术——最后一条用来验证「从零写内容」没有被中译英的口子放行。
 7. 启动 `python -m rag.web` 并在浏览器中通过页面测试 SSE 回答。
+8. 确认出处链接可用：`curl -sI "https://www.stringandstick.cn/rag/北大学标PKUNMUN2025_学术标准手册.pdf"` 应返回 200 与 `application/pdf`（GET / HEAD 都放行，带 `Range` 的请求返回 206）。
 
 如需新增测试，建议自行创建 `tests/` 目录并引入 `pytest`。
 
@@ -303,6 +306,6 @@ sudo -u deploy pm2 logs rag-web
 - `parse` 依赖大模型重写原始资料，结果可能遗漏细节或引入偏差，且每个文件都要调用一次 API（耗时与计费）；入库前应人工抽查 `source/json/` 产物。
 - 索引为全量重建（`ingest` 每次重扫全部 `source/json/`）；`parse` 有基于修改时间的增量跳过，但切分粒度由大模型决定，同一文件重解析的条目数会变化（实测同一输入一次 20 条、一次 18 条）。
 - 重排分数阈值 `RERANK_SCORE_THRESHOLD=0.30` 是经验值：当前语料与 bge-reranker-v2-m3 下能把无关问题挡掉（实测无关问题重排最高分 0.0000–0.0001，相关问题 0.59–0.92）。换 rerank 模型或换语料后需重新标定，阈值过高会把弱相关但正确的段落一并滤掉。
-- 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。
+- 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。当前手册的 299 个条目都指向 `/rag/北大学标PKUNMUN2025_学术标准手册.pdf`，同一份文档共用一个链接（没有按章节/页码定位到具体页）。
 - 用途边界（拒绝决策、拒绝代写文件）只靠 `SYSTEM_PROMPT` 约束，是提示词层面的软限制，不是访问控制：在提示词注入或强指令下仍可能被绕过，需要硬保证时应在服务层加拦截或人工审核。
 - 检索为空时仍会调用一次大模型（为了支持不依赖原文的语法修改），因此无关问题也会消耗一次 API 调用并多几秒延迟；不再有「无检索结果就直接返回」的快速路径。同理，判定某个问题是否越界也由大模型完成，代码里没有关键词黑名单。
