@@ -258,6 +258,20 @@ sudo -u deploy pm2 logs rag-web
 
 修改配置后执行 `nginx -t && systemctl reload nginx`。
 
+### 提交与推送（Git）
+
+远端仓库是 `git@github.com:lishili31/AI-RAGforMUN.git`，默认分支为 `main`；本机检出的分支名却是 `master`，跟踪 `origin/main`。两者不同名，**不要执行 `git push origin master`**——它会在远端新建一个 `master` 分支而不更新 `main`（GitHub 界面随后会提示开 PR）。正确的推送方式：
+
+```bash
+git push origin master:main   # 本地 master → 远端 main
+```
+
+或者把本地分支改名为 `main` 并重设上游，之后 `git push` 直接可用：
+
+```bash
+git branch -m master main && git branch -u origin/main
+```
+
 ## 代码组织与模块职责
 
 | 文件 | 职责 |
