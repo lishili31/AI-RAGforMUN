@@ -56,6 +56,8 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 
 `source/json/Understanding the WTO — The principles of the trading system.json` 的 32 个条目同样共用一个 `url`：`https://www.wto.org/english/thewto_e/whatis_e/tif_e/fact2_e.htm`，取自原文 HTML 的 `og:url`（该页没有 `meta name="source"`，也没有 `<link rel="canonical">`，正文链接全是相对路径）。
 
+`source/json/Report_of_the_United_Nations_Conference_on_Trade_and_Development_on_its_sixteenth_session.json` 的 88 个条目（UNCTAD 第十六届会议报告，英文）`url` 一律为空串：对应的 `.md` 原件不在 `source/` 下，也没有可用的原始链接，无从抽取。出处因此只标注文档名与章节，没有链接。该文件是外部导入的 JSON（非本机 `parse` 产物），导入时补了 `url` 字段、并把 `source` 里的 `.md` 后缀去掉。
+
 ## 项目结构
 
 ```text
@@ -79,7 +81,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 │   ├── test.json             # 人工保留的 schema 样例，勿覆盖
 │   ├── 北大学标…手册.pdf      # 手册 PDF 原件，经 web 对外提供，作为出处链接
 │   ├── Understanding …html   # WTO 页面原件（英文），出处链接指向 wto.org
-│   └── json/                 # 结构化 JSON：手册 299 条 + WTO 页面 32 条
+│   └── json/                 # 结构化 JSON：手册 299 条 + WTO 页面 32 条 + UNCTAD 报告 88 条
 └── rag_store/                # 构建好的向量索引（由 python -m rag.ingest 生成，可重建）
 ```
 
@@ -166,7 +168,7 @@ rag_store/  （chunks.json + vectors.npy + meta.json）
 | `EMBEDDING_USE_BASE64` | `True` | Embedding 返回是否使用 base64 编码 |
 | `RERANK_MODEL` | `bge-reranker-v2-m3` | Rerank 模型名 |
 
-当前 `rag_store/` 已构建：331 个文本块、1024 维，来源为 `北大学标PKUNMUN2025_学术标准手册`（299 块，由同名 JSON 切分而来）与 `Understanding the WTO — The principles of the trading system.html`（32 块）。新增资料后需重跑 `python -m rag.parse` 与 `python -m rag.ingest`；在索引建好之前 `cli` 与 `web` 的提问都会失败，`GET /api/stats` 会返回 `ready: false`。
+当前 `rag_store/` 已构建：496 个文本块、1024 维，来源为 `北大学标PKUNMUN2025_学术标准手册`（299 块，由同名 JSON 切分而来）、`Understanding the WTO — The principles of the trading system.html`（32 块）与 `Report_of_the_United_Nations_Conference_on_Trade_and_Development_on_its_sixteenth_session`（165 块，由 88 条 JSON 切分而来）。新增资料后需重跑 `python -m rag.parse` 与 `python -m rag.ingest`；在索引建好之前 `cli` 与 `web` 的提问都会失败，`GET /api/stats` 会返回 `ready: false`。
 
 ## 常用命令
 
@@ -307,7 +309,7 @@ git branch -m master main && git branch -u origin/main
 1. 运行 `python -m rag.parse`，确认 `source/json/` 下生成了结构合法的 JSON 数组。
 2. 运行 `python -m rag.ingest` 成功构建索引（`rag_store/meta.json` 出现，`chunk_count` 大于 0，且其中的 `embedding_model` 与当前 Embedding 模型一致）。
    - 增量行为验证：紧接着再运行一次 `python -m rag.ingest`，日志应显示全部文本块命中向量缓存、跳过 Embedding 调用，且块数不变；给 `source/json/` 新增或修改正文后再运行，日志应只对新增/变化的文本调用 Embedding（其余块「复用」）；删除某份资料后运行，对应块与向量应消失且余下向量不变。
-     注意「复用」只保证不重新调用 Embedding，不保证文件逐字节相同：`VectorStore.__init__` 每次构造都会再做一次 L2 归一化（`store.py:45`），而 `load()` 假定已归一化、不再处理，所以复用来的已归一化向量会被再除一次模长，float32 末位可能抖动。实测连续 ingest 后 331 行中 2 行变化、最大绝对差 `3e-8`、余弦相似度变化 0.0，且行模长偏差逐次收敛（1.19e-7 → 5.96e-8）。校验增量是否生效应看日志的「复用 N / 新向量化 M」与 vstack 后的行序，而非 `md5sum vectors.npy`。
+     注意「复用」只保证不重新调用 Embedding，不保证文件逐字节相同：`VectorStore.__init__` 每次构造都会再做一次 L2 归一化（`store.py:45`），而 `load()` 假定已归一化、不再处理，所以复用来的已归一化向量会被再除一次模长，float32 末位可能抖动。实测（当时索引 331 行）连续 ingest 后 331 行中 2 行变化、最大绝对差 `3e-8`、余弦相似度变化 0.0，且行模长偏差逐次收敛（1.19e-7 → 5.96e-8）。校验增量是否生效应看日志的「复用 N / 新向量化 M」与 vstack 后的行序，而非 `md5sum vectors.npy`。
 3. 运行 `python -m rag.cli "一个模联问题"` 检查是否能正常检索并生成带出处链接的答案。
 4. 运行 `python -m rag.cli "<一句有语病的英语>"`，确认「语法修改」在没有任何检索结果时也能作答。
 5. 运行 `python -m rag.cli "把这句中文译成英语:<一句话>"` 与 `"帮我润色这句英语:<一句话>"`，确认中译英与润色同样可用（语言处理不依赖检索结果）。
@@ -334,6 +336,6 @@ git branch -m master main && git branch -u origin/main
 - `ingest` 的增量以文本块正文为键：本地分块仍会全量重扫 `source/json/`（不调用 API），只有新增或内容变化的正文才重新向量化，因此改写一个条目的文字只会重算该条目切出的块。缓存只校验 `embedding_model` 与 `dim`——同一模型名换了 Embedding 服务地址或返回编码（base64/float）不会使缓存失效；由旧版本构建、`meta.json` 缺少 `embedding_model` 的索引在升级后第一次运行会全量重建一次。
 - `parse` 有基于修改时间的增量跳过，但切分粒度由大模型决定，同一文件重解析的条目数会变化（实测同一输入一次 20 条、一次 18 条）；条目数或文字变化都会产生新正文，`ingest` 只对这些增量重新向量化。
 - 重排分数阈值 `RERANK_SCORE_THRESHOLD=0.30` 是经验值：当前语料与 bge-reranker-v2-m3 下能把无关问题挡掉（实测无关问题重排最高分 0.0000–0.0001，相关问题 0.59–0.92）。换 rerank 模型或换语料后需重新标定，阈值过高会把弱相关但正确的段落一并滤掉。
-- 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。手册的 299 个条目都指向 `/rag/北大学标PKUNMUN2025_学术标准手册.pdf`，WTO 页面的 32 个条目都指向 `https://www.wto.org/english/thewto_e/whatis_e/tif_e/fact2_e.htm`，同一份文档共用一个链接（没有按章节/页码定位到具体页）。
+- 出处链接取决于源资料是否给出 URL；缺失时 `url` 为空串，只能标注文档名与章节，`format_source` 会自动省略该片段。手册的 299 个条目都指向 `/rag/北大学标PKUNMUN2025_学术标准手册.pdf`，WTO 页面的 32 个条目都指向 `https://www.wto.org/english/thewto_e/whatis_e/tif_e/fact2_e.htm`，同一份文档共用一个链接（没有按章节/页码定位到具体页）。UNCTAD 报告的 88 个条目没有链接：`build_messages` 因此不输出 `链接:` 行，而 `SYSTEM_PROMPT` 要求「链接已在每段原文开头给出、必须原样使用」——实测此时大模型会退而把文档标题本身写成 Markdown 链接（指向一个不存在的相对地址），或直接照抄提示词里的示例链接 `https://example.org/mun/rules`。要给出处链接就填真实 `url`，否则引用里的链接不可点。
 - 用途边界（拒绝决策、拒绝代写文件）只靠 `SYSTEM_PROMPT` 约束，是提示词层面的软限制，不是访问控制：在提示词注入或强指令下仍可能被绕过，需要硬保证时应在服务层加拦截或人工审核。
 - 检索为空时仍会调用一次大模型（为了支持不依赖原文的语法修改），因此无关问题也会消耗一次 API 调用并多几秒延迟；不再有「无检索结果就直接返回」的快速路径。同理，判定某个问题是否越界也由大模型完成，代码里没有关键词黑名单。
